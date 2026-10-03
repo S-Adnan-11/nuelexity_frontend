@@ -1,19 +1,19 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { APITester } from "./APITester";
+import { BrowserRouter, Route, Routes } from "react-router";
+import Auth from "./components/pages/Auth";
+import Dashboard from "./components/pages/Dashboard";
+import { RootRedirect } from "./components/RootRedirect";
 import "./index.css";
-import {BrowserRouter, Route, Routes} from "react-router";
-import Auth  from "./components/pages/Auth";
-import Dahsboard from "./components/pages/Dashboard";
-import logo from "./logo.svg";
-import reactLogo from "./react.svg";
 
 export function App() {
-  return <BrowserRouter>
+  return (
+    <BrowserRouter>
       <Routes>
-            <Route path="/dashboard" element={<Dahsboard />} />
-          <Route path="/auth" element={<Auth />} />
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/auth" element={<Auth />} />
       </Routes>
-  </BrowserRouter>
+    </BrowserRouter>
+  );
 }
 
 export default App;
