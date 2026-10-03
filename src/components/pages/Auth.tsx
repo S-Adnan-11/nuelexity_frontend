@@ -1,11 +1,5 @@
 import { Button } from "../ui/button";
-import {createClient} from "@supabase/supabase-js";
-
-const supabase = createClient(
-  
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY!
-);
+import { supabase } from "@/lib/supabase/client";
 
 async function Login (provider: "google" | "github") {
     const { data, error } = await supabase.auth.signInWithOAuth({
