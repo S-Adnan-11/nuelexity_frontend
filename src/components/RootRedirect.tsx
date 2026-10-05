@@ -1,33 +1,14 @@
-import { useEffect, useState } from "react";
 import { Navigate } from "react-router";
-import { supabase } from "@/lib/supabase/client";
+import { useAuth } from "./AuthProvider";
 
 export function RootRedirect() {
-  const [session, setSession] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(!!session);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(!!session);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  if (session === null) {
+  const { loading } = useAuth();
+  if (loading)
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
-        <p className="text-lg animate-pulse">Loading...</p>
+      <div className="loading-screen" role="status">
+        Opening Nuelexity…
       </div>
     );
-  }
-
-  return session ? <Navigate to="/dashboard" replace /> : <Navigate to="/auth" replace />;
+  // Guests now land in research too; sign-in is available when they want history.
+  return <Navigate to="/dashboard" replace />;
 }

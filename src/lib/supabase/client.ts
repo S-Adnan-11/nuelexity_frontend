@@ -1,28 +1,18 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "../config";
 
-const getEnv = (key: string, fallback: string): string => {
-  if (typeof process !== "undefined" && process.env && process.env[key]) {
-    return process.env[key]!;
-  }
-  if (
-    typeof import.meta !== "undefined" &&
-    (import.meta as any).env &&
-    (import.meta as any).env[key]
-  ) {
-    return (import.meta as any).env[key];
-  }
-  return fallback;
-};
-
-const supabaseUrl =
-  process.env.VITE_SUPABASE_URL ||
-  getEnv("VITE_SUPABASE_URL", "https://placeholder.supabase.co");
-
-const supabaseAnonKey =
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  getEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "placeholder-anon-key");
-
-export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
+// Keep maadan-dev's shared client. Every screen uses this same session.
+export const supabase =
+  SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY
+    ? createSupabaseClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+        auth: {
+          flowType: "pkce",
+          detectSessionInUrl: true,
+          persistSession: true,
+          autoRefreshToken: true,
+        },
+      })
+    : null;
 
 export function createClient() {
   return supabase;

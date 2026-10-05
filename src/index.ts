@@ -1,41 +1,14 @@
 import { serve } from "bun";
 import index from "./index.html";
+import { publicEnv } from "../public-env";
 
+const settings = publicEnv();
 const server = serve({
+  port: Number(process.env.PORT || 3000),
   routes: {
-    // Serve index.html for all unmatched routes.
+    "/config.json": () => Response.json(settings, { headers: { "Cache-Control": "no-store" } }),
     "/*": index,
-
-    "/api/hello": {
-      async GET(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "GET",
-        });
-      },
-      async PUT(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "PUT",
-        });
-      },
-    },
-
-    "/api/hello/:name": async req => {
-      const name = req.params.name;
-      return Response.json({
-        message: `Hello, ${name}!`,
-      });
-    },
   },
-
-  development: process.env.NODE_ENV !== "production" && {
-    // Enable browser hot reloading in development
-    hmr: true,
-
-    // Echo console logs from the browser to the server
-    console: true,
-  },
+  development: process.env.NODE_ENV !== "production" && { hmr: true, console: true },
 });
-
-console.log(`🚀 Server running at ${server.url}`);
+console.log(`Nuelexity frontend running at ${server.url}`);
