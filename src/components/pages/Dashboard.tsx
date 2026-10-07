@@ -24,6 +24,7 @@ import {
   search,
 } from "@/lib/api";
 import { TURNSTILE_SITE_KEY } from "@/lib/config";
+import { useGuestSession } from "@/lib/useGuestSession";
 import { supabase } from "@/lib/supabase/client";
 import type { Conversation, Message } from "@/lib/types";
 import { useAuth } from "../AuthProvider";
@@ -52,8 +53,7 @@ export default function Dashboard() {
   const [remaining, setRemaining] = useState<number | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false),
     [copied, setCopied] = useState<string | null>(null);
-  const [botToken, setBotToken] = useState(""),
-    [botReset, setBotReset] = useState(0);
+  const guest = useGuestSession(!token && !loading);
   const controllerRef = useRef<AbortController | null>(null);
   const historyController = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -150,7 +150,7 @@ export default function Dashboard() {
   async function submit(value = query) {
     const question = value.trim();
     if (!question || question.length > 1000 || busy || loadingThread || loading) return;
-    if (!token && TURNSTILE_SITE_KEY && !botToken) {
+    if (!token && (!guest.ready || guest.checking || guest.verifying)) {
       setError("Complete the verification before searching.");
       return;
     }
@@ -198,7 +198,6 @@ export default function Dashboard() {
           query: question,
           ...(token && conversationId ? { conversationId } : {}),
           ...(guestHistory?.length ? { history: guestHistory } : {}),
-          ...(!token && botToken ? { turnstileToken: botToken } : {}),
         },
         token,
         controller.signal,
@@ -234,6 +233,8 @@ export default function Dashboard() {
       update({ status: "failed", followUps: [] });
       if (controller.signal.aborted) setError("Search stopped. Any text above may be incomplete.");
       else {
+        if (!token && error instanceof ApiError && error.code === "BOT_SESSION_EXPIRED")
+          guest.reset();
         const failure = error as Error;
         const retry =
           error instanceof ApiError && error.retryAfter
@@ -246,8 +247,6 @@ export default function Dashboard() {
         controllerRef.current = null;
         setBusy(false);
         setStage("");
-        setBotToken("");
-        setBotReset((k) => k + 1);
         if (token) void refreshHistory();
       }
     }
@@ -523,7 +522,7 @@ export default function Dashboard() {
                     !query.trim() ||
                     loading ||
                     loadingThread ||
-                    (!token && !!TURNSTILE_SITE_KEY && !botToken)
+                    (!token && (!guest.ready || guest.checking || guest.verifying))
                   }
                   aria-label="Send question"
                 >
@@ -532,9 +531,35 @@ export default function Dashboard() {
               )}
             </div>
           </form>
-          {!token && TURNSTILE_SITE_KEY && (
-            <Turnstile onToken={setBotToken} onError={setError} resetKey={botReset} />
+          {!token &&
+            !loading &&
+            !guest.ready &&
+            !guest.checking &&
+            !guest.error &&
+            TURNSTILE_SITE_KEY && (
+              <Turnstile onToken={guest.verify} onError={guest.onError} resetKey={guest.resetKey} />
+            )}
+          {!token && !loading && (guest.checking || guest.verifying) && (
+            <p role="status" className="quota-note">
+              Checking guest verification…
+            </p>
           )}
+          {!token && guest.error && (
+            <p role="alert" className="error-notice">
+              {guest.error}{" "}
+              <button type="button" onClick={guest.reset}>
+                Retry verification
+              </button>
+            </p>
+          )}
+          {!token &&
+            !loading &&
+            !guest.ready &&
+            !guest.checking &&
+            !guest.error &&
+            !TURNSTILE_SITE_KEY && (
+              <p className="error-notice">Guest search is unavailable. Please sign in.</p>
+            )}
           <p className="quota-note">
             {remaining !== null
               ? `${remaining} searches left in your daily allowance.`
@@ -547,7 +572,11 @@ export default function Dashboard() {
             <div className="suggestion-list">
               {suggestions.map((question) => (
                 <button
-                  disabled={busy || loading}
+                  disabled={
+                    busy ||
+                    loading ||
+                    (!token && (!guest.ready || guest.checking || guest.verifying))
+                  }
                   key={question}
                   onClick={() => {
                     setQuery(question);

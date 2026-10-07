@@ -1,5 +1,7 @@
 # Frontend handoff for maadan-dev
 
+Guest verification uses `src/lib/useGuestSession.ts` and backend `/guest/session`. The hook exchanges Turnstile once, retains the signed pass in `sessionStorage`, and checks it after refresh. Keep `src/lib/api.ts` as the only request boundary; it attaches `X-Guest-Pass` only to guest searches. A pass lasts at most two hours and cannot reset quotas. Keep the widget unmounted while clearance is valid, and never automatically retry a failed search after re-verification. Tests cover storage, headers, refresh/expiry recovery, and quotas.
+
 Your root-redirect/shared-Supabase patch is included at upstream `cd6ac87`. The app keeps `/auth` and `/dashboard`, a shared client, and session-aware routing. The root now opens the research page for both guests and signed-in users. Auth state is centralized in `AuthProvider` rather than duplicated by each screen.
 
 ## Working pieces

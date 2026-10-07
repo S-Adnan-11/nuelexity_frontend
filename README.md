@@ -39,6 +39,6 @@ Static hosting must include `dist/config.json` and rewrite SPA paths (`/dashboar
 
 `maadan-dev`'s root-routing and shared-client changes were pulled before this implementation. Their structure is retained and expanded for guest research and centralized auth state.
 
-See [handoff and frontend tasks](docs/HANDOFF.md) and [AGENTS.md](AGENTS.md). The backend's `docs/API.md` is the canonical request/SSE contract. `src/lib/api.ts` and `src/lib/stream.ts` are the only request/stream boundaries; keep UI code independent of provider implementations.
+See [handoff and frontend tasks](docs/HANDOFF.md). The backend's `docs/API.md` is the canonical request/SSE contract. `src/lib/api.ts` and `src/lib/stream.ts` are the only request/stream boundaries; keep UI code independent of provider implementations.
 
 The current answer renderer uses safe text and inline citation links. Rich Markdown, paginated library browsing, route-based thread URLs, and expanded keyboard/accessibility polish are planned frontend tasks. Guest threads are temporary; saved history requires sign-in.

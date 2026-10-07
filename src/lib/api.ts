@@ -1,6 +1,7 @@
 import { BACKEND_URL } from "./config";
 import { readSearchEvents } from "./stream";
 import type { Conversation, Message, SearchEvent } from "./types";
+import { guestPassStore } from "./guest-pass";
 
 export class ApiError extends Error {
   constructor(
@@ -54,6 +55,46 @@ export async function getConversation(
 export async function deleteConversation(id: string, token: string) {
   await request(`/conversations/${encodeURIComponent(id)}`, token, { method: "DELETE" });
 }
+const guestHeaders = (): Record<string, string> => {
+  const pass = guestPassStore.read();
+  return pass ? { "X-Guest-Pass": pass } : {};
+};
+export interface GuestSession {
+  verified: boolean;
+  verificationRequired: boolean;
+  expiresAt: number | null;
+}
+export async function getGuestSession(signal?: AbortSignal): Promise<GuestSession> {
+  const response = await request("/guest/session", undefined, { headers: guestHeaders(), signal });
+  const body = await response.json();
+  if (
+    typeof body.verified !== "boolean" ||
+    typeof body.verificationRequired !== "boolean" ||
+    !(body.expiresAt === null || typeof body.expiresAt === "number")
+  )
+    throw new Error("Guest verification returned an invalid response.");
+  if (!body.verified) guestPassStore.clear();
+  return body;
+}
+export async function verifyGuestChallenge(turnstileToken: string, signal: AbortSignal) {
+  const response = await request("/guest/session", undefined, {
+    method: "POST",
+    body: JSON.stringify({ turnstileToken }),
+    signal,
+  });
+  const body = await response.json();
+  signal.throwIfAborted();
+  if (
+    typeof body.pass !== "string" ||
+    body.pass.length > 1024 ||
+    !body.pass.startsWith("v1.") ||
+    typeof body.expiresAt !== "number" ||
+    body.expiresAt <= Date.now()
+  )
+    throw new Error("Guest verification returned an invalid response.");
+  guestPassStore.save(body.pass);
+  return body.expiresAt as number;
+}
 export async function search(
   input: {
     query: string;
@@ -69,6 +110,7 @@ export async function search(
     method: "POST",
     body: JSON.stringify(input),
     signal,
+    headers: token ? {} : guestHeaders(),
   });
   if (!response.body || !response.headers.get("Content-Type")?.includes("text/event-stream"))
     throw new Error("The server didn't return an answer stream.");
