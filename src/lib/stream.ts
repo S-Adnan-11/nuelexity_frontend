@@ -1,4 +1,5 @@
 import type { SearchEvent } from "./types";
+import { isModelAttribution } from "./models";
 
 const names = new Set(["meta", "status", "sources", "delta", "follow_ups", "done", "error"]);
 export async function* readSearchEvents(
@@ -71,6 +72,12 @@ export async function* readSearchEvents(
           !(fields.conversationId === null || typeof fields.conversationId === "string")
         )
           throw new Error("Invalid completion event.");
+        if (name === "done" && (
+          (fields.model != null && !isModelAttribution(fields.model)) ||
+          (fields.answerKind != null && !["ai", "sources-only", "no-sources"].includes(String(fields.answerKind))) ||
+          (fields.answerKind === "ai" && !isModelAttribution(fields.model)) ||
+          (fields.model != null && fields.answerKind !== "ai")
+        )) throw new Error("The answer's model could not be confirmed.");
         if (
           name === "error" &&
           (typeof fields.message !== "string" || typeof fields.code !== "string")

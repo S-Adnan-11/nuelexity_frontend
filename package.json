@@ -13,6 +13,7 @@
     "build": "bun run build.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:browser": "bun scripts/check-model-ui.ts",
     "check": "bun run typecheck && bun test && bun run build"
   },
   "dependencies": {

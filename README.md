@@ -29,11 +29,20 @@ Configure Supabase Auth to allow `http://localhost:3000/auth/callback`. Missing 
 
 ```bash
 bun run check        # Typecheck, parser/public-config tests, production build
+bun run test:browser # After build: Chrome + local auth/provider fixtures; no real credits
 bun run build        # Static files in dist/, including config.json
 bun run start        # Production Bun server, loads public settings at startup
 ```
 
 Static hosting must include `dist/config.json` and rewrite SPA paths (`/dashboard`, `/auth`, `/auth/callback`) to `index.html`. Configure the backend HTTPS URL before building for deployment. `start` serves the application through Bun; it does not use the `dist` directory. No hosting service is selected or provisioned.
+
+## Conversation model selection
+
+The composer loads labels, Preview flags, availability and the default from backend `GET /models`. Signed-in users can choose an available approved model; guests see the disabled backend default and a sign-in hint. Qwen is clearly labelled Preview and Groq is identified as the serving provider. Changing the choice while an answer streams affects the next message; successful answers use the model attribution from the completion event.
+
+Choices persist per conversation through the owner-checked backend API. Refresh/reopening restores them, new threads start at the backend default, and sign-out returns to guest behavior. An unavailable stored ID stays visible and blocks sending until an available model is selected. Unsaved choices offer a manual save retry; interrupted/failed answers remain incomplete. Old messages without model metadata display “Model unknown”.
+
+The backend's `202610140001_model_selection.sql` migration must be applied before this persistence flow works on the existing Supabase project. Exact owner instructions and verification evidence are in backend `docs/MODEL_SELECTION.md`. No new frontend environment settings or provider credentials are needed. Browser checks use the production bundle with fake auth/providers; set `CHROME_BIN` if Chrome is not at `/usr/bin/google-chrome`.
 
 ## Collaboration
 

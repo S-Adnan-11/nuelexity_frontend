@@ -20,16 +20,20 @@ import {
   ApiError,
   deleteConversation,
   getConversation,
+  getModels,
   listConversations,
   search,
+  setConversationModel,
 } from "@/lib/api";
 import { TURNSTILE_SITE_KEY } from "@/lib/config";
 import { useGuestSession } from "@/lib/useGuestSession";
 import { supabase } from "@/lib/supabase/client";
-import type { Conversation, Message } from "@/lib/types";
+import type { Conversation, Message, ModelCatalogue } from "@/lib/types";
+import { answerModelLabel } from "@/lib/models";
 import { useAuth } from "../AuthProvider";
 import { Answer, safeSourceUrl } from "../Answer";
 import { Turnstile } from "../Turnstile";
+import { ModelSelector } from "../ModelSelector";
 
 const suggestions = [
   "How does an AI search engine find its sources?",
@@ -51,12 +55,74 @@ export default function Dashboard() {
     [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false),
     [copied, setCopied] = useState<string | null>(null);
   const guest = useGuestSession(!token && !loading);
   const controllerRef = useRef<AbortController | null>(null);
   const historyController = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const selectedRef = useRef<string | null>(null);
+  const modelWrites = useRef(Promise.resolve());
+  const modelEpoch = useRef(0);
+  const modelRevision = useRef(0);
+  const activeKey = userId ? `nuelexity:active-thread:${userId}` : null;
+  const effectiveModelId = token ? selectedModelId ?? catalogue?.defaultModelId ?? null : catalogue?.defaultModelId ?? null;
+  selectedRef.current = effectiveModelId;
+  const modelReady = !!catalogue && !modelsLoading && !modelsError && !modelSaving && !modelSaveError &&
+    (catalogue.answerMode === "sources-only" || !!catalogue.models.find((model) => model.id === effectiveModelId && model.available));
+
+  const refreshModels = useCallback(async (signal?: AbortSignal) => {
+    setModelsLoading(true);
+    try {
+      const result = await getModels(token, signal);
+      if (!signal?.aborted) { setCatalogue(result); setModelsError(null); }
+    } catch (error) {
+      if (!signal?.aborted) setModelsError((error as Error).message);
+    } finally {
+      if (!signal?.aborted) setModelsLoading(false);
+    }
+  }, [token]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshModels(controller.signal);
+    return () => controller.abort();
+  }, [refreshModels]);
+
+  function rememberThread(id: string | null) {
+    if (!activeKey) return;
+    try {
+      if (id) sessionStorage.setItem(activeKey, id);
+      else sessionStorage.removeItem(activeKey);
+    } catch { /* The server still stores the conversation if browser storage is unavailable. */ }
+  }
+  function persistModel(id: string, modelId: string) {
+    if (!token) return;
+    const epoch = modelEpoch.current, revision = ++modelRevision.current;
+    setModelSaving(true);
+    setModelSaveError(null);
+    // Serialize quick changes: an older network response cannot become the saved choice.
+    modelWrites.current = modelWrites.current.catch(() => {}).then(async () => {
+      if (epoch !== modelEpoch.current) return;
+      await setConversationModel(id, modelId, token);
+    }).catch((failure) => {
+      if (epoch === modelEpoch.current && revision === modelRevision.current)
+        setModelSaveError(`Your choice was not saved. Choose a model again to retry. ${(failure as Error).message}`);
+    }).finally(() => {
+      if (epoch === modelEpoch.current && revision === modelRevision.current) setModelSaving(false);
+    });
+  }
+  function chooseModel(modelId: string) {
+    setSelectedModelId(modelId);
+    selectedRef.current = modelId;
+    setModelSaveError(null);
+    if (conversationId) persistModel(conversationId, modelId);
+  }
 
   const refreshHistory = useCallback(
     async (signal?: AbortSignal) => {
@@ -88,6 +154,16 @@ export default function Dashboard() {
     setRemaining(null);
     setBusy(false);
     setLoadingThread(false);
+    modelEpoch.current++;
+    setSelectedModelId(null);
+    setModelSaving(false);
+    setModelSaveError(null);
+    if (userId) {
+      try {
+        const saved = sessionStorage.getItem(`nuelexity:active-thread:${userId}`);
+        if (saved) void openThread(saved);
+      } catch { /* Opening from the library remains available. */ }
+    }
   }, [userId]);
   useEffect(
     () => () => {
@@ -112,6 +188,12 @@ export default function Dashboard() {
     setBusy(false);
     setLoadingThread(false);
     setMobileOpen(false);
+    modelEpoch.current++;
+    setSelectedModelId(null);
+    selectedRef.current = catalogue?.defaultModelId ?? null;
+    setModelSaving(false);
+    setModelSaveError(null);
+    rememberThread(null);
     inputRef.current?.focus();
   }
   async function openThread(id: string) {
@@ -125,8 +207,14 @@ export default function Dashboard() {
     try {
       const detail = await getConversation(id, token, controller.signal);
       if (!controller.signal.aborted) {
+        modelEpoch.current++;
         setConversationId(id);
         setMessages(detail.messages);
+        setSelectedModelId(detail.conversation.selected_model ?? null);
+        selectedRef.current = detail.conversation.selected_model ?? catalogue?.defaultModelId ?? null;
+        setModelSaveError(null);
+        setModelSaving(false);
+        rememberThread(id);
       }
     } catch (error) {
       if (!controller.signal.aborted) setError((error as Error).message);
@@ -150,11 +238,16 @@ export default function Dashboard() {
   async function submit(value = query) {
     const question = value.trim();
     if (!question || question.length > 1000 || busy || loadingThread || loading) return;
+    if (!modelReady) {
+      setError("Select an available model and save your choice before sending. If models could not load, refresh them.");
+      return;
+    }
     if (!token && (!guest.ready || guest.checking || guest.verifying)) {
       setError("Complete the verification before searching.");
       return;
     }
     const controller = new AbortController();
+    const requestModelId = effectiveModelId; // Frozen for this request, even if the selector changes.
     controllerRef.current = controller;
     setBusy(true);
     setError(null);
@@ -196,6 +289,7 @@ export default function Dashboard() {
       await search(
         {
           query: question,
+          ...(catalogue?.answerMode === "ai" && requestModelId ? { modelId: requestModelId } : {}),
           ...(token && conversationId ? { conversationId } : {}),
           ...(guestHistory?.length ? { history: guestHistory } : {}),
         },
@@ -206,6 +300,9 @@ export default function Dashboard() {
           switch (event.event) {
             case "meta":
               setConversationId(event.data.conversationId);
+              rememberThread(event.data.conversationId);
+              if (token && event.data.conversationId && selectedRef.current && selectedRef.current !== requestModelId)
+                persistModel(event.data.conversationId, selectedRef.current);
               setRemaining(event.data.remaining);
               break;
             case "status":
@@ -223,7 +320,7 @@ export default function Dashboard() {
               update({ followUps: event.data.questions });
               break;
             case "done":
-              update({ status: "complete" });
+              update({ status: "complete", model: event.data.model ?? null, answerKind: event.data.answerKind ?? null });
               break;
           }
         },
@@ -231,10 +328,13 @@ export default function Dashboard() {
     } catch (error) {
       if (controllerRef.current !== controller) return;
       update({ status: "failed", followUps: [] });
+      setQuery((current) => current || question);
       if (controller.signal.aborted) setError("Search stopped. Any text above may be incomplete.");
       else {
         if (!token && error instanceof ApiError && error.code === "BOT_SESSION_EXPIRED")
           guest.reset();
+        if (error instanceof ApiError && ["UNKNOWN_MODEL", "MODEL_UNAVAILABLE", "MODEL_PERMISSION"].includes(error.code))
+          void refreshModels();
         const failure = error as Error;
         const retry =
           error instanceof ApiError && error.retryAfter
@@ -416,6 +516,7 @@ export default function Dashboard() {
                           <span className="incomplete-label">Incomplete</span>
                         )}
                       </div>
+                      {answerModelLabel(message) && <p className="answer-model">{answerModelLabel(message)}</p>}
                       {!!message.sources.length && (
                         <div className="source-grid" aria-label="Sources">
                           {message.sources.map((source) => {
@@ -461,7 +562,7 @@ export default function Dashboard() {
                           <p>Keep exploring</p>
                           {message.followUps.map((question) => (
                             <button
-                              disabled={busy || loadingThread}
+                              disabled={busy || loadingThread || !modelReady}
                               key={question}
                               onClick={() => void submit(question)}
                             >
@@ -502,6 +603,14 @@ export default function Dashboard() {
                 }
               }}
             />
+            <ModelSelector catalogue={catalogue} selectedId={effectiveModelId} signedIn={!!token}
+              loading={modelsLoading} saving={modelSaving} error={modelsError || modelSaveError}
+              disabled={loading || loadingThread}
+              onChange={chooseModel} refreshLabel={modelSaveError ? "Retry saving" : "Refresh models"}
+              onRefresh={() => {
+                if (modelSaveError && conversationId && effectiveModelId) persistModel(conversationId, effectiveModelId);
+                else void refreshModels();
+              }} />
             <div className="composer-toolbar">
               <span>
                 <Globe size={15} /> Web <span className="composer-divider" /> Sources included
@@ -522,6 +631,7 @@ export default function Dashboard() {
                     !query.trim() ||
                     loading ||
                     loadingThread ||
+                    !modelReady ||
                     (!token && (!guest.ready || guest.checking || guest.verifying))
                   }
                   aria-label="Send question"

@@ -393,6 +393,45 @@ button {
   font-weight: 400;
   margin-left: auto;
 }
+.answer-model {
+  color: #b2c5a4;
+  font-size: 11px;
+  margin: -8px 0 18px;
+  overflow-wrap: anywhere;
+}
+.model-control {
+  margin: 0 14px 8px;
+  border-top: 1px solid #3a4234;
+  padding-top: 10px;
+}
+.model-control-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+.model-control select {
+  min-height: 44px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #56664b;
+  border-radius: 7px;
+  background: #23281f;
+  color: #e1eadb;
+  font: inherit;
+}
+.model-control select:focus-visible, .model-refresh:focus-visible {
+  outline: 2px solid #c1d9b0;
+  outline-offset: 3px;
+}
+.model-control select:disabled { opacity: 0.8; }
+.model-provider, .model-hint { color: #b2c5a4; font-size: 11px; }
+.model-hint { margin: 5px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
+.model-hint:empty { display: none; }
+.model-hint a, .model-refresh { color: #c1d9b0; text-decoration: underline; }
+.model-refresh { min-height: 44px; border: 0; background: none; font: inherit; padding: 5px 8px; }
 .source-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));

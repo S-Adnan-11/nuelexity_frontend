@@ -1,6 +1,7 @@
 import { BACKEND_URL } from "./config";
 import { readSearchEvents } from "./stream";
-import type { Conversation, Message, SearchEvent } from "./types";
+import type { Conversation, Message, ModelCatalogue, SearchEvent } from "./types";
+import { isModelAttribution } from "./models";
 import { guestPassStore } from "./guest-pass";
 
 export class ApiError extends Error {
@@ -55,6 +56,20 @@ export async function getConversation(
 export async function deleteConversation(id: string, token: string) {
   await request(`/conversations/${encodeURIComponent(id)}`, token, { method: "DELETE" });
 }
+export async function getModels(token?: string, signal?: AbortSignal): Promise<ModelCatalogue> {
+  const response = await request("/models", token, { signal });
+  const body = await response.json();
+  if (typeof body.defaultModelId !== "string" || typeof body.canSelect !== "boolean" ||
+      !["ai", "sources-only"].includes(body.answerMode) || !Array.isArray(body.models) ||
+      !body.models.every((model: unknown) => isModelAttribution(model) && typeof (model as {available?: unknown}).available === "boolean"))
+    throw new Error("Model availability returned an invalid response.");
+  return body;
+}
+export async function setConversationModel(id: string, modelId: string, token: string, signal?: AbortSignal) {
+  await request(`/conversations/${encodeURIComponent(id)}/model`, token, {
+    method: "PUT", body: JSON.stringify({ modelId }), signal,
+  });
+}
 const guestHeaders = (): Record<string, string> => {
   const pass = guestPassStore.read();
   return pass ? { "X-Guest-Pass": pass } : {};
@@ -99,6 +114,7 @@ export async function search(
   input: {
     query: string;
     conversationId?: string;
+    modelId?: string;
     turnstileToken?: string;
     history?: { role: "user" | "assistant"; content: string }[];
   },
@@ -115,7 +131,7 @@ export async function search(
   if (!response.body || !response.headers.get("Content-Type")?.includes("text/event-stream"))
     throw new Error("The server didn't return an answer stream.");
   for await (const event of readSearchEvents(response.body)) {
-    if (event.event === "error") throw new ApiError(event.data.message, 503, event.data.code);
+    if (event.event === "error") throw new ApiError(event.data.message, 503, event.data.code, event.data.retryAfter);
     onEvent(event);
   }
 }
