@@ -2,8 +2,6 @@
 
 ![Nuelexity Return Cat](public/brand/v2/logos/lockup-sage.svg)
 
-Follow your curiosity. The approved Return Cat identity uses local SVGs, Manrope and DM Serif Display; font licences ship with the assets.
-
 A Bun + React + TypeScript research workspace with guest search, Google/GitHub OAuth, streaming answers, numbered sources, follow-ups, and private saved conversations.
 
 ## Run

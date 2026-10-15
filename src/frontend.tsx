@@ -24,7 +24,7 @@ try {
   logo.src = "/brand/v2/logos/lockup-sage.svg";
   logo.width = 178; logo.height = 40; logo.alt = "Nuelexity";
   const notice = document.createElement("p");
-  notice.textContent = "Nuelexity couldn't start. Check the public frontend configuration and refresh the page.";
+  notice.textContent = "Nuelexity couldn't start due to configuration issues. Try refreshing the page.";
   const retry = document.createElement("button");
   retry.textContent = "Retry";
   retry.onclick = () => window.location.reload();

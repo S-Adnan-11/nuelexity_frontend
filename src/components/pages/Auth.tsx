@@ -33,7 +33,7 @@ export default function Auth() {
       <div className="auth-card">
         <BrandMark size={120} />
         {/* <div className="auth-logo"><BrandLogo /></div> */}
-        <h1>Curiosity killed the cat, <span style={{color:'#3e684f'}}>Nuelexity</span> brought it back!</h1>
+        <h1>Curiosity killed the cat, <span style={{color:'#57CBB5'}}>nuelexity</span> brought it back!</h1>
         <p>Sign in to save your research and access more models.</p>
         {(error || sessionError) && (
           <p role="alert" className="error-notice">
