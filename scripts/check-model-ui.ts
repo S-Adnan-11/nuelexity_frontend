@@ -67,9 +67,9 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req): Pro
     }});
     return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
   }
-  const name = url.pathname.startsWith("/chunk-") || url.pathname.startsWith("/logo-") ? url.pathname.slice(1) : "index.html";
-  const file = Bun.file(path.resolve("dist", name));
-  return new Response(file);
+  const candidate = path.resolve("dist", url.pathname.slice(1));
+  const file = candidate.startsWith(path.resolve("dist") + path.sep) ? Bun.file(candidate) : null;
+  return new Response(file && await file.exists() ? file : Bun.file("dist/index.html"));
 }});
 const profile = await mkdtemp(path.join(tmpdir(), "nuelexity-model-browser-"));
 const chrome = Bun.spawn([process.env.CHROME_BIN || "/usr/bin/google-chrome", "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdout: "ignore", stderr: "ignore" });
@@ -152,10 +152,11 @@ try {
   assert.ok(await evaluate("document.body.innerText.includes('Qwen 3.8 27B · Preview')"));
   assert.equal(await evaluate("document.querySelector('#chat-model').value"), models[0]!.id);
   await submit("next"); await idle();
-  assert.equal(requests[1], models[0]!.id); //ADVANCED GPT MODEL
+  assert.equal(requests[1], models[0]!.id);
   assert.ok(await evaluate("document.body.innerText.includes('GPT-OSS 20B ·')"));
   await choose(1);
-  assert.equal(requests[0], models[1]!.id);
+  await submit("larger model"); await idle();
+  assert.equal(requests[2], models[1]!.id);
   assert.ok(await evaluate("document.body.innerText.includes('GPT-OSS 120B ·')"));
 
   await command("Page.reload");
@@ -175,7 +176,7 @@ try {
   await evaluate("document.querySelector('.new-search').click(); Array.from(document.querySelectorAll('.thread-row button')).find(button => button.title === 'Browser verification').click()");
   await until(async () => await evaluate("document.querySelector('#chat-model')?.value === 'retired/model'"), "retired stored selection");
   assert.ok(await evaluate("document.querySelector('[aria-label=\"Send question\"]').disabled"));
-  assert.ok(await evaluate("document.body.innerText.includes('Choose an available model before sending')"));
+  assert.ok(await evaluate("document.body.innerText.includes('Choose an available model.')"));
   await evaluate(`(() => { const select = document.querySelector('#chat-model'); select.value = ${JSON.stringify(models[0]!.id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)} && !document.body.innerText.includes('Saving model choice')`), "explicit recovery from retired selection");
   await choose(2); await submit("permission"); await idle();
@@ -197,7 +198,8 @@ try {
   const screenshot = await command("Page.captureScreenshot", { format: "png" });
   await writeFile("/tmp/nuelexity-model-selector-mobile.png", Buffer.from(screenshot.data, "base64"));
   await evaluate("sessionStorage.setItem('fixture-signed-out','1'); document.querySelector('[aria-label=\"Sign out\"]').click()");
-  await until(async () => await evaluate("document.querySelector('#chat-model')?.disabled === true && document.body.innerText.includes('Sign in to choose a model')"), "sign-out returns guest behavior");
+  await until(async () => await evaluate("document.querySelector('#chat-model')?.disabled === true && document.body.innerText.includes('Sign in to access more models')"), "sign-out returns guest behavior");
+  await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)}`), "guest catalogue loaded");
   assert.equal(await evaluate("document.querySelector('#chat-model').value"), models[0]!.id);
   assert.ok(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"));
   const guestScreenshot = await command("Page.captureScreenshot", { format: "png" });

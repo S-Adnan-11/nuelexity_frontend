@@ -1,5 +1,5 @@
 import tailwind from "bun-plugin-tailwind";
-import { rm, writeFile } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { publicEnv } from "./public-env";
 
@@ -12,6 +12,7 @@ const result = await Bun.build({
   plugins: [tailwind],
   minify: true,
   target: "browser",
+  publicPath: "/",
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
@@ -21,6 +22,7 @@ if (!result.success) {
   process.exit(1);
 }
 await writeFile(path.join(outdir, "config.json"), JSON.stringify(settings, null, 2) + "\n");
+await cp("public", outdir, { recursive: true });
 for (const output of result.outputs)
   console.log(
     `${path.relative(process.cwd(), output.path)}  ${(output.size / 1024).toFixed(1)} KB`,

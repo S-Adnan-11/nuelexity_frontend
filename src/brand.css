@@ -1,0 +1,37 @@
+/* Approved Return Cat v2 tokens; Bun bundles the locally licensed WOFF files. */
+@font-face { font-family: "Manrope"; src: url("../public/brand/v2/fonts/Manrope-Variable.woff") format("woff"); font-style: normal; font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "DM Serif Display"; src: url("../public/brand/v2/fonts/DMSerifDisplay-Regular.woff") format("woff"); font-style: normal; font-weight: 400; font-display: swap; }
+:root { --nx-font-ui: "Manrope", system-ui, sans-serif; --nx-font-display: "DM Serif Display", Georgia, serif; --nx-radius-control: 10px; --nx-radius-card: 18px; --nx-duration: 220ms; --nx-ease: cubic-bezier(.2,.8,.2,1); }
+:root, [data-theme="dark"] {
+  --nx-bg: #111916;
+  --nx-surface: #1F2A24;
+  --nx-surface-raised: #26372D;
+  --nx-text: #EEF1E9;
+  --nx-muted: #A4B1A7;
+  --nx-primary: #B8C7AD;
+  --nx-on-primary: #111916;
+  --nx-link: #57CBB5;
+  --nx-secondary: #79A9E5;
+  --nx-control-border: #718171;
+  --nx-divider: #35443B;
+  --nx-focus: #57CBB5;
+  --nx-warning: #EBC677;
+  --nx-error: #FFA09E;
+}
+[data-theme="light"] {
+  --nx-bg: #F4F5EF;
+  --nx-surface: #FFFFFF;
+  --nx-surface-raised: #E9EEE5;
+  --nx-text: #1C2821;
+  --nx-muted: #526157;
+  --nx-primary: #355542;
+  --nx-on-primary: #F4F5EF;
+  --nx-link: #006B60;
+  --nx-secondary: #1D5DAD;
+  --nx-control-border: #818C81;
+  --nx-divider: #C8D1C6;
+  --nx-focus: #006B60;
+  --nx-warning: #76510D;
+  --nx-error: #AD292E;
+}
+@media (prefers-reduced-motion: reduce) { :root { --nx-duration: 0ms; } }

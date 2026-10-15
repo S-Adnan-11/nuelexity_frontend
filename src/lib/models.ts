@@ -9,7 +9,7 @@ export function isModelAttribution(value: unknown): value is ModelAttribution {
 export function answerModelLabel(message: Message) {
   if (message.status !== "complete") return null;
   if (message.model && isModelAttribution(message.model))
-    return `${message.model.name}${message.model.preview ? " · Preview" : ""} ·  ${message.model.provider}`;
+    return `${message.model.name}${message.model.preview ? " · Preview" : ""} · Served by ${message.model.provider}`;
   if (message.answerKind === "sources-only") return "Sources only · No model used";
   if (message.answerKind === "no-sources") return "No usable sources · No model used";
   return "Model unknown";

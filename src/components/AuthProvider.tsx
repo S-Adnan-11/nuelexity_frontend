@@ -18,25 +18,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
+    let authRevision = 0;
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, next) => {
       if (active) {
+        authRevision++;
         setSession(next);
+        setError(null);
         setLoading(false);
       }
     });
+    const restoreRevision = authRevision;
     supabase.auth
       .getSession()
       .then(({ data, error }) => {
-        if (active) {
+        if (active && authRevision === restoreRevision) {
           setSession(data.session);
           setError(error ? "We couldn't restore your session. Please sign in again." : null);
           setLoading(false);
         }
       })
       .catch(() => {
-        if (active) {
+        if (active && authRevision === restoreRevision) {
           setError("Sign-in is temporarily unavailable.");
           setLoading(false);
         }

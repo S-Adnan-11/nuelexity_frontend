@@ -3,7 +3,6 @@ import Auth from "./components/pages/Auth";
 import Dashboard from "./components/pages/Dashboard";
 import { RootRedirect } from "./components/RootRedirect";
 import { AuthProvider } from "./components/AuthProvider";
-import "./index.css";
 
 export function App() {
   return (

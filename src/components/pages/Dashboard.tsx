@@ -34,6 +34,8 @@ import { useAuth } from "../AuthProvider";
 import { Answer, safeSourceUrl } from "../Answer";
 import { Turnstile } from "../Turnstile";
 import { ModelSelector } from "../ModelSelector";
+import { BrandLogo, BrandMark, ThreadSkeleton, WorkspaceSkeleton } from "../Brand";
+import { GuestInvitation } from "../GuestInvitation";
 
 const suggestions = [
   "How does an AI search engine find its sources?",
@@ -41,6 +43,13 @@ const suggestions = [
   "Help me understand quantum computing",
 ];
 export default function Dashboard() {
+  const { session, loading } = useAuth();
+  if (loading) return <WorkspaceSkeleton />;
+  // A new identity gets a fresh workspace. Token renewal keeps the same one.
+  return <Workspace key={session?.user.id ?? "guest"} />;
+}
+
+function Workspace() {
   const { session, loading, error: authError } = useAuth();
   const navigate = useNavigate();
   const token = session?.access_token,
@@ -53,6 +62,9 @@ export default function Dashboard() {
     [loadingThread, setLoadingThread] = useState(false);
   const [stage, setStage] = useState(""),
     [error, setError] = useState<string | null>(null);
+  const [historyStatus, setHistoryStatus] = useState<"loading" | "refreshing" | "ready" | "failed">("loading");
+  const [threadStatus, setThreadStatus] = useState<"idle" | "loading" | "refreshing" | "ready" | "failed">("idle");
+  const [threadError, setThreadError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
@@ -63,9 +75,21 @@ export default function Dashboard() {
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false),
     [copied, setCopied] = useState<string | null>(null);
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 800px)").matches);
+  const sidebarRef = useRef<HTMLElement>(null);
   const guest = useGuestSession(!token && !loading);
   const controllerRef = useRef<AbortController | null>(null);
   const historyController = useRef<AbortController | null>(null);
+  const listController = useRef<AbortController | null>(null);
+  const modelsController = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const conversationRef = useRef<string | null>(null);
+  const messageRef = useRef(messages);
+  messageRef.current = messages;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
+  const pendingScroll = useRef<number | null>(null);
+  const nearBottom = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectedRef = useRef<string | null>(null);
   const modelWrites = useRef(Promise.resolve());
@@ -74,18 +98,22 @@ export default function Dashboard() {
   const activeKey = userId ? `nuelexity:active-thread:${userId}` : null;
   const effectiveModelId = token ? selectedModelId ?? catalogue?.defaultModelId ?? null : catalogue?.defaultModelId ?? null;
   selectedRef.current = effectiveModelId;
-  const modelReady = !!catalogue && !modelsLoading && !modelsError && !modelSaving && !modelSaveError &&
+  const modelReady = threadStatus !== "failed" && !!catalogue && !modelsLoading && !modelsError && !modelSaving && !modelSaveError &&
     (catalogue.answerMode === "sources-only" || !!catalogue.models.find((model) => model.id === effectiveModelId && model.available));
 
   const refreshModels = useCallback(async (signal?: AbortSignal) => {
+    modelsController.current?.abort();
+    const controller = new AbortController();
+    modelsController.current = controller;
+    signal?.addEventListener("abort", () => controller.abort(), { once: true });
     setModelsLoading(true);
     try {
-      const result = await getModels(token, signal);
-      if (!signal?.aborted) { setCatalogue(result); setModelsError(null); }
+      const result = await getModels(token, controller.signal);
+      if (!controller.signal.aborted && mounted.current) { setCatalogue(result); setModelsError(null); }
     } catch (error) {
-      if (!signal?.aborted) setModelsError((error as Error).message);
+      if (!controller.signal.aborted && mounted.current) setModelsError((error as Error).message);
     } finally {
-      if (!signal?.aborted) setModelsLoading(false);
+      if (!controller.signal.aborted && mounted.current) setModelsLoading(false);
     }
   }, [token]);
   useEffect(() => {
@@ -124,50 +152,47 @@ export default function Dashboard() {
     if (conversationId) persistModel(conversationId, modelId);
   }
 
-  const refreshHistory = useCallback(
-    async (signal?: AbortSignal) => {
-      if (!token) {
-        setConversations([]);
-        return;
-      }
-      try {
-        setConversations(await listConversations(token, signal));
-        setHistoryError(null);
-      } catch (error) {
-        if (!signal?.aborted) setHistoryError((error as Error).message);
-      }
-    },
-    [token],
-  );
+  const refreshHistory = useCallback(async (signal?: AbortSignal) => {
+    if (!token) { setHistoryStatus("ready"); return; }
+    listController.current?.abort();
+    const controller = new AbortController();
+    listController.current = controller;
+    signal?.addEventListener("abort", () => controller.abort(), { once: true });
+    setHistoryStatus((current) => current === "ready" || current === "refreshing" ? "refreshing" : "loading");
+    setHistoryError(null);
+    try {
+      const result = await listConversations(token, controller.signal);
+      if (controller.signal.aborted || !mounted.current || listController.current !== controller) return;
+      setConversations(result);
+      setHistoryStatus("ready");
+    } catch (error) {
+      if (controller.signal.aborted || !mounted.current) return;
+      setHistoryError((error as Error).message);
+      setHistoryStatus("failed");
+    }
+  }, [token]);
   useEffect(() => {
     const controller = new AbortController();
     void refreshHistory(controller.signal);
     return () => controller.abort();
   }, [refreshHistory]);
   useEffect(() => {
-    controllerRef.current?.abort();
-    historyController.current?.abort();
-    controllerRef.current = null;
-    historyController.current = null;
-    setMessages([]);
-    setConversationId(null);
-    setRemaining(null);
-    setBusy(false);
-    setLoadingThread(false);
-    modelEpoch.current++;
-    setSelectedModelId(null);
-    setModelSaving(false);
-    setModelSaveError(null);
+    mounted.current = true;
     if (userId) {
       try {
         const saved = sessionStorage.getItem(`nuelexity:active-thread:${userId}`);
         if (saved) void openThread(saved);
-      } catch { /* Opening from the library remains available. */ }
+      } catch { /* The library remains available without browser storage. */ }
     }
-  }, [userId]);
+  }, []);
   useEffect(
     () => () => {
+      mounted.current = false;
+      modelEpoch.current++;
       controllerRef.current?.abort();
+      controllerRef.current = null;
+      listController.current?.abort();
+      modelsController.current?.abort();
       historyController.current?.abort();
     },
     [],
@@ -175,6 +200,27 @@ export default function Dashboard() {
   useEffect(() => {
     if (authError) setError(authError);
   }, [authError]);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 800px)");
+    const update = () => { setNarrow(media.matches); if (!media.matches) setMobileOpen(false); };
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!mobileOpen || !narrow) return;
+    const previous = document.activeElement as HTMLElement | null;
+    sidebarRef.current?.querySelector<HTMLButtonElement>(".sidebar-close")?.focus();
+    function keydown(event: KeyboardEvent) {
+      if (event.key === "Escape") { setMobileOpen(false); return; }
+      if (event.key !== "Tab") return;
+      const items = Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? []);
+      const first = items[0], last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    document.addEventListener("keydown", keydown);
+    return () => { document.removeEventListener("keydown", keydown); previous?.focus(); };
+  }, [mobileOpen, narrow]);
 
   function newSearch() {
     controllerRef.current?.abort();
@@ -183,6 +229,9 @@ export default function Dashboard() {
     historyController.current = null;
     setMessages([]);
     setConversationId(null);
+    conversationRef.current = null;
+    setThreadStatus("idle");
+    setThreadError(null);
     setQuery("");
     setError(null);
     setBusy(false);
@@ -196,39 +245,81 @@ export default function Dashboard() {
     rememberThread(null);
     inputRef.current?.focus();
   }
+  function saveScroll() {
+    const id = conversationRef.current;
+    if (!id || !userId || !scrollRef.current || !messageRef.current.length || pendingScroll.current !== null) return;
+    const top = scrollRef.current.scrollTop;
+    scrollPositions.current.set(id, top);
+    try { sessionStorage.setItem(`nuelexity:scroll:${userId}:${id}`, String(top)); } catch {}
+  }
   async function openThread(id: string) {
     if (!token || busy) return;
+    const same = conversationRef.current === id;
+    saveScroll();
     historyController.current?.abort();
     const controller = new AbortController();
     historyController.current = controller;
+    modelEpoch.current++;
+    setModelSaving(false);
+    setModelSaveError(null);
     setError(null);
+    setThreadError(null);
     setLoadingThread(true);
+    setThreadStatus(same && messageRef.current.length ? "refreshing" : "loading");
     setMobileOpen(false);
+    conversationRef.current = id;
+    setConversationId(id);
+    rememberThread(id);
+    if (!same) { setMessages([]); setSelectedModelId(null); }
     try {
       const detail = await getConversation(id, token, controller.signal);
-      if (!controller.signal.aborted) {
-        modelEpoch.current++;
-        setConversationId(id);
-        setMessages(detail.messages);
-        setSelectedModelId(detail.conversation.selected_model ?? null);
-        selectedRef.current = detail.conversation.selected_model ?? catalogue?.defaultModelId ?? null;
-        setModelSaveError(null);
-        setModelSaving(false);
-        rememberThread(id);
+      if (controller.signal.aborted || !mounted.current || historyController.current !== controller) return;
+      setMessages(detail.messages);
+      setSelectedModelId(detail.conversation.selected_model ?? null);
+      selectedRef.current = detail.conversation.selected_model ?? catalogue?.defaultModelId ?? null;
+      setThreadStatus("ready");
+      if (!same) {
+        let saved = scrollPositions.current.get(id);
+        try { saved ??= Number(sessionStorage.getItem(`nuelexity:scroll:${userId}:${id}`) ?? NaN); } catch {}
+        pendingScroll.current = Number.isFinite(saved) ? saved! : 0;
       }
     } catch (error) {
-      if (!controller.signal.aborted) setError((error as Error).message);
+      if (controller.signal.aborted || !mounted.current) return;
+      setThreadError((error as Error).message);
+      setThreadStatus("failed");
     } finally {
-      if (historyController.current === controller) {
+      if (historyController.current === controller && mounted.current) {
         historyController.current = null;
         setLoadingThread(false);
       }
     }
   }
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    if (pendingScroll.current !== null) { scroll.scrollTop = pendingScroll.current; pendingScroll.current = null; }
+    else if (busy && nearBottom.current) scroll.scrollTop = scroll.scrollHeight;
+  }, [messages, busy]);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    function resize() {
+      const height = viewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty("--workspace-height", `${height}px`);
+      document.documentElement.dataset.compactViewport = String(height < 650);
+    }
+    resize();
+    viewport?.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      document.documentElement.style.removeProperty("--workspace-height");
+      delete document.documentElement.dataset.compactViewport;
+    };
+  }, []);
   async function removeThread(id: string) {
     if (!token || busy || !window.confirm("Delete this conversation and its messages?")) return;
     try {
       await deleteConversation(id, token);
+      if (!mounted.current) return;
       if (conversationId === id) newSearch();
       await refreshHistory();
     } catch (error) {
@@ -276,6 +367,7 @@ export default function Dashboard() {
           .slice(-6)
           .map((m) => ({ role: m.role, content: m.content.slice(0, 1000) }))
       : undefined;
+    nearBottom.current = true;
     setMessages((previous) => [...previous, userMessage, assistantMessage]);
     const update = (change: Partial<Message> | ((message: Message) => Partial<Message>)) =>
       setMessages((previous) =>
@@ -300,6 +392,7 @@ export default function Dashboard() {
           switch (event.event) {
             case "meta":
               setConversationId(event.data.conversationId);
+              conversationRef.current = event.data.conversationId;
               rememberThread(event.data.conversationId);
               if (token && event.data.conversationId && selectedRef.current && selectedRef.current !== requestModelId)
                 persistModel(event.data.conversationId, selectedRef.current);
@@ -343,7 +436,7 @@ export default function Dashboard() {
         setError(failure.message + retry);
       }
     } finally {
-      if (controllerRef.current === controller) {
+      if (controllerRef.current === controller && mounted.current) {
         controllerRef.current = null;
         setBusy(false);
         setStage("");
@@ -362,7 +455,6 @@ export default function Dashboard() {
       setError("Sign-out failed. Please try again.");
       return;
     }
-    newSearch();
     navigate("/dashboard");
   }
   async function copy(message: Message) {
@@ -390,12 +482,9 @@ export default function Dashboard() {
           onClick={() => setMobileOpen(false)}
         />
       )}
-      <aside className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
+      <aside ref={sidebarRef} inert={narrow && !mobileOpen} className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
         <Link className="brand" to="/dashboard" onClick={newSearch}>
-          <span className="brand-mark" aria-hidden="true">
-            ✳
-          </span>{" "}
-          nuelexity
+          <BrandLogo />
         </Link>
         <button
           className="sidebar-close icon-button"
@@ -426,7 +515,10 @@ export default function Dashboard() {
               Sign in to save your threads.
             </p>
           )}
-          {token && !conversations.length && !historyError && (
+          {token && historyStatus === "loading" && !conversations.length && <div className="library-skeleton" role="status" aria-label="Loading library"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
+          {historyStatus === "refreshing" && <p className="sidebar-note" role="status">Refreshing library…</p>}
+          {!token && loading && <p role="status">Restoring your workspace…</p>}
+          {token && historyStatus === "ready" && !conversations.length && (
             <p className="sidebar-note">Your research will appear here.</p>
           )}
           {conversations.map((conversation) => (
@@ -435,6 +527,7 @@ export default function Dashboard() {
               key={conversation.id}
             >
               <button
+                aria-current={conversationId === conversation.id ? "page" : undefined}
                 disabled={busy}
                 onClick={() => void openThread(conversation.id)}
                 title={conversation.title}
@@ -454,7 +547,7 @@ export default function Dashboard() {
         </nav>
         <div className="sidebar-footer">
           <span className="small-orbit" aria-hidden="true">
-            ✳
+            <BrandMark />
           </span>
           {session ? (
             <>
@@ -475,13 +568,19 @@ export default function Dashboard() {
 
       <main className="research-main">
         <header className="topbar">
+          <Link className="mobile-brand" to="/dashboard" onClick={newSearch}><BrandMark decorative={false} size={28} /></Link>
           <span>
             <Globe size={14} /> Search the web
           </span>
           <span className="plan-label">{session ? "Personal workspace" : "Guest workspace"}</span>
         </header>
-        <div className={`research-content ${messages.length ? "has-messages" : ""}`}>
-          {!messages.length && (
+        <div className={`research-content ${(messages.length || threadStatus !== "idle") ? "has-messages" : ""}`}>
+          <div className="conversation-scroll" ref={scrollRef} onScroll={() => {
+            const scroll = scrollRef.current;
+            if (scroll) nearBottom.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 100;
+            saveScroll();
+          }}>
+          {!messages.length && threadStatus === "idle" && (
             <section className="welcome">
               <p className="eyebrow">FOR THE CURIOUS MINDS</p>
               <h1>
@@ -494,24 +593,23 @@ export default function Dashboard() {
               </p>
             </section>
           )}
-          {loadingThread && (
-            <p role="status" className="loading-thread">
-              Opening your thread…
-            </p>
-          )}
+          {threadStatus === "loading" && <ThreadSkeleton />}
+          {threadStatus === "refreshing" && <p className="quota-note" role="status">Refreshing conversation…</p>}
+          {threadStatus === "ready" && !messages.length && <p className="empty-thread">This conversation has no messages yet. Ask your first question below.</p>}
+          {threadError && <div role="alert" className="error-notice">{threadError}<button className="text-button" onClick={() => conversationId && void openThread(conversationId)}>Retry conversation</button></div>}
           {!!messages.length && (
             <section className="messages" aria-label="Research conversation">
               {messages.map((message) => (
                 <article className={`message ${message.role}`} key={message.id}>
                   {message.role === "user" ? (
-                    <h2>{message.content}</h2>
+                    <p>{message.content}</p>
                   ) : (
                     <>
                       <div className="answer-heading">
                         <span className="small-orbit" aria-hidden="true">
-                          ✳
+                          <BrandMark />
                         </span>
-                        <span>Answer</span>
+                        <span>Nuelexity</span>
                         {message.status === "failed" && (
                           <span className="incomplete-label">Incomplete</span>
                         )}
@@ -583,6 +681,8 @@ export default function Dashboard() {
               {error}
             </div>
           )}
+          </div>
+          <div className="composer-dock">
           <form className="composer" onSubmit={onSubmit}>
             <label htmlFor="question" className="sr-only">
               {messages.length ? "Ask a follow-up question" : "Ask anything"}
@@ -678,7 +778,8 @@ export default function Dashboard() {
                 : "Your research is saved to your account."}{" "}
             {!token && <Link to="/auth">Sign in</Link>}
           </p>
-          {!messages.length && (
+          </div>
+          {!messages.length && threadStatus === "idle" && (
             <div className="suggestion-list">
               {suggestions.map((question) => (
                 <button
@@ -701,6 +802,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        {!session && <GuestInvitation />}
         <footer className="page-footer">
           Stay curious. Check the sources.<span>Answers can be imperfect.</span>
         </footer>

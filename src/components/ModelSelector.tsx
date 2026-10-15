@@ -33,7 +33,7 @@ export function ModelSelector({ catalogue, selectedId, signedIn, loading, saving
         {catalogue?.answerMode === "ai" && <span className="model-provider"></span>}
       </div>
       <p id="model-hint" className="model-hint">
-        {!signedIn ? <><Link to="/auth">Sign in</Link> to choose a model. Guests use the backend default.</> :
+        {!signedIn ? <><Link to="/auth">Sign in</Link> to access more models.</> :
           catalogue?.answerMode === "sources-only" ? "AI answers are not enabled. Searches return sources only." :
           "Qwen is in Preview; its availability can change."}
       </p>

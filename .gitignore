@@ -40,3 +40,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 supabase/.temp/
 supabase/.branches/
 AGENTS.md
+docs/evidence/
+docs/RETURN_CAT_IMPLEMENTATION.md

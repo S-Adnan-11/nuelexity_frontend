@@ -1,5 +1,9 @@
 # Nuelexity frontend
 
+![Nuelexity Return Cat](public/brand/v2/logos/lockup-sage.svg)
+
+Follow your curiosity. The approved Return Cat identity uses local SVGs, Manrope and DM Serif Display; font licences ship with the assets.
+
 A Bun + React + TypeScript research workspace with guest search, Google/GitHub OAuth, streaming answers, numbered sources, follow-ups, and private saved conversations.
 
 ## Run
@@ -29,7 +33,7 @@ Configure Supabase Auth to allow `http://localhost:3000/auth/callback`. Missing 
 
 ```bash
 bun run check        # Typecheck, parser/public-config tests, production build
-bun run test:browser # After build: Chrome + local auth/provider fixtures; no real credits
+bun run test:browser # After build: model + research Chrome fixtures and Bun asset smoke checks; no real credits
 bun run build        # Static files in dist/, including config.json
 bun run start        # Production Bun server, loads public settings at startup
 ```
@@ -50,4 +54,8 @@ The backend's `202610140001_model_selection.sql` migration must be applied befor
 
 See [handoff and frontend tasks](docs/HANDOFF.md). The backend's `docs/API.md` is the canonical request/SSE contract. `src/lib/api.ts` and `src/lib/stream.ts` are the only request/stream boundaries; keep UI code independent of provider implementations.
 
-The current answer renderer uses safe text and inline citation links. Rich Markdown, paginated library browsing, route-based thread URLs, and expanded keyboard/accessibility polish are planned frontend tasks. Guest threads are temporary; saved history requires sign-in.
+Answers render safe Markdown, tables and numbered citations without raw HTML or remote images. User questions align right inside the same reading column; the composer has its own reserved bottom space. Guest invitations wait for auth restoration, use the shared Google/GitHub actions, and remember dismissal for this tab. Guest threads are temporary; saved history requires sign-in.
+
+Auth-pending, initial load, background refresh, successful empty results and failures have separate UI states. Switching accounts replaces all private in-memory state and cancels old requests. Switching threads clears the previous thread immediately; same-thread refresh keeps valid content. Only the active thread ID and scroll offset are stored in tab storage, scoped by user and thread; private messages are fetched from the server.
+
+The intended public URL is **https://nuelexity.devs.surf** (owner confirmed; hosting/DNS not configured yet). Canonical/social metadata already uses it. The local implementation report, screenshot evidence and deployment steps are in `docs/RETURN_CAT_IMPLEMENTATION.md`; that report and `docs/evidence/` are intentionally excluded from Git. Nothing was deployed. Paginated library browsing and route-based thread URLs remain future work.
