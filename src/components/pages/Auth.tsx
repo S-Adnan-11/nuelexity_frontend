@@ -1,25 +1,35 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "../AuthProvider";
 import { BrandLogo, BrandMark } from "../Brand";
 import { OAuthButtons } from "../OAuthButtons";
+import { rememberSignInThread, takeSignInThread, threadPath, validThreadId } from "@/lib/thread-navigation";
 
 export default function Auth() {
   const { session, loading, error: sessionError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [error, setError] = useState<string | null>(null);
-  const callback = window.location.pathname === "/auth/callback";
+  const callback = location.pathname === "/auth/callback";
   useEffect(() => {
-    if (session) navigate("/dashboard", { replace: true });
-    const params = new URLSearchParams(window.location.search);
-    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const params = new URLSearchParams(location.search);
+    const hash = new URLSearchParams(location.hash.slice(1));
+    const requested = params.get("thread");
+    if (session) {
+      const stored = takeSignInThread();
+      const id = requested && validThreadId(requested) ? requested : callback ? stored : null;
+      navigate(id ? threadPath(id) : "/dashboard", { replace: true });
+      return;
+    }
+    if (!callback) rememberSignInThread(requested);
     if (params.has("error") || hash.has("error")) {
+      rememberSignInThread(null);
       setError("Sign-in wasn't completed. Please try again.");
       window.history.replaceState(null, "", "/auth");
     }
-  }, [session, navigate]);
+  }, [session, navigate, callback, location.search, location.hash]);
   useEffect(() => {
     if (!callback || session || loading) return;
     const timer = setTimeout(() => setError("Sign-in couldn't finish. Please try again."), 10000);

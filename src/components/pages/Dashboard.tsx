@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -21,14 +21,15 @@ import {
   deleteConversation,
   getConversation,
   getModels,
-  listConversations,
   search,
   setConversationModel,
 } from "@/lib/api";
 import { TURNSTILE_SITE_KEY } from "@/lib/config";
 import { useGuestSession } from "@/lib/useGuestSession";
+import { useConversationLibrary } from "@/lib/useConversationLibrary";
+import { validThreadId, threadPath } from "@/lib/thread-navigation";
 import { supabase } from "@/lib/supabase/client";
-import type { Conversation, Message, ModelCatalogue } from "@/lib/types";
+import type { Message, ModelCatalogue } from "@/lib/types";
 import { answerModelLabel } from "@/lib/models";
 import { useAuth } from "../AuthProvider";
 import { Answer, safeSourceUrl } from "../Answer";
@@ -44,6 +45,15 @@ const suggestions = [
 ];
 export default function Dashboard() {
   const { session, loading } = useAuth();
+  const navigate = useNavigate();
+  const previousIdentity = useRef<string | null | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (loading) return;
+    const identity = session?.user.id ?? null;
+    if (previousIdentity.current !== undefined && previousIdentity.current !== identity)
+      navigate("/dashboard", { replace: true });
+    previousIdentity.current = identity;
+  }, [session?.user.id, loading, navigate]);
   if (loading) return <WorkspaceSkeleton />;
   // A new identity gets a fresh workspace. Token renewal keeps the same one.
   return <Workspace key={session?.user.id ?? "guest"} />;
@@ -52,9 +62,14 @@ export default function Dashboard() {
 function Workspace() {
   const { session, loading, error: authError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { conversationId: routeThreadId } = useParams();
   const token = session?.access_token,
     userId = session?.user.id;
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const library = useConversationLibrary(token);
+  const { conversations, status: historyStatus, error: historyError, refresh: refreshHistory } = library;
+  const initialRoute = useRef(true);
+  const routeKey = useRef<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [query, setQuery] = useState("");
@@ -62,10 +77,8 @@ function Workspace() {
     [loadingThread, setLoadingThread] = useState(false);
   const [stage, setStage] = useState(""),
     [error, setError] = useState<string | null>(null);
-  const [historyStatus, setHistoryStatus] = useState<"loading" | "refreshing" | "ready" | "failed">("loading");
   const [threadStatus, setThreadStatus] = useState<"idle" | "loading" | "refreshing" | "ready" | "failed">("idle");
   const [threadError, setThreadError] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -80,7 +93,6 @@ function Workspace() {
   const guest = useGuestSession(!token && !loading);
   const controllerRef = useRef<AbortController | null>(null);
   const historyController = useRef<AbortController | null>(null);
-  const listController = useRef<AbortController | null>(null);
   const modelsController = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const conversationRef = useRef<string | null>(null);
@@ -154,46 +166,40 @@ function Workspace() {
     if (conversationId) persistModel(conversationId, modelId);
   }
 
-  const refreshHistory = useCallback(async (signal?: AbortSignal) => {
-    if (!token) { setHistoryStatus("ready"); return; }
-    listController.current?.abort();
-    const controller = new AbortController();
-    listController.current = controller;
-    signal?.addEventListener("abort", () => controller.abort(), { once: true });
-    setHistoryStatus((current) => current === "ready" || current === "refreshing" ? "refreshing" : "loading");
-    setHistoryError(null);
-    try {
-      const result = await listConversations(token, controller.signal);
-      if (controller.signal.aborted || !mounted.current || listController.current !== controller) return;
-      setConversations(result);
-      setHistoryStatus("ready");
-    } catch (error) {
-      if (controller.signal.aborted || !mounted.current) return;
-      setHistoryError((error as Error).message);
-      setHistoryStatus("failed");
-    }
-  }, [token]);
-  useEffect(() => {
-    const controller = new AbortController();
-    void refreshHistory(controller.signal);
-    return () => controller.abort();
-  }, [refreshHistory]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     mounted.current = true;
-    if (userId) {
-      try {
-        const saved = sessionStorage.getItem(`nuelexity:active-thread:${userId}`);
-        if (saved) void openThread(saved);
-      } catch { /* The library remains available without browser storage. */ }
+    const changed = routeKey.current !== location.key;
+    routeKey.current = location.key;
+    if (initialRoute.current) {
+      initialRoute.current = false;
+      // Upgrade the old per-tab pointer once. After that, the URL owns navigation.
+      if (!routeThreadId && userId) {
+        try {
+          const saved = sessionStorage.getItem(`nuelexity:active-thread:${userId}`);
+          if (saved && validThreadId(saved)) { navigate(threadPath(saved), { replace: true }); return; }
+        } catch { /* Direct URLs and the library work without browser storage. */ }
+      }
     }
-  }, []);
+    if (!routeThreadId) {
+      if (changed) resetWorkspace();
+      return;
+    }
+    if (!token || !validThreadId(routeThreadId)) {
+      resetWorkspace();
+      setThreadStatus("failed");
+      setThreadError(!token ? "Sign in to open a saved conversation." : "This conversation URL is invalid.");
+      return;
+    }
+    // The meta event attaches a URL to the answer already streaming in this workspace.
+    if (conversationRef.current === routeThreadId && controllerRef.current) return;
+    void openThread(routeThreadId);
+  }, [location.key, token]);
   useEffect(
     () => () => {
       mounted.current = false;
       modelEpoch.current++;
       controllerRef.current?.abort();
       controllerRef.current = null;
-      listController.current?.abort();
       modelsController.current?.abort();
       historyController.current?.abort();
     },
@@ -224,7 +230,8 @@ function Workspace() {
     return () => { document.removeEventListener("keydown", keydown); previous?.focus(); };
   }, [mobileOpen, narrow]);
 
-  function newSearch() {
+  function resetWorkspace() {
+    saveScroll();
     controllerRef.current?.abort();
     controllerRef.current = null;
     historyController.current?.abort();
@@ -248,6 +255,11 @@ function Workspace() {
     rememberThread(null);
     inputRef.current?.focus();
   }
+  function newSearch() {
+    const leaveThread = !!conversationRef.current || !!routeThreadId;
+    resetWorkspace();
+    if (leaveThread) navigate("/dashboard");
+  }
   function saveScroll() {
     const id = conversationRef.current;
     if (!id || !userId || !scrollRef.current || !messageRef.current.length || pendingScroll.current !== null) return;
@@ -256,9 +268,13 @@ function Workspace() {
     try { sessionStorage.setItem(`nuelexity:scroll:${userId}:${id}`, String(top)); } catch {}
   }
   async function openThread(id: string) {
-    if (!token || busy) return;
+    if (!token) return;
     const same = conversationRef.current === id;
     saveScroll();
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setBusy(false);
+    setStage("");
     historyController.current?.abort();
     const controller = new AbortController();
     historyController.current = controller;
@@ -273,7 +289,7 @@ function Workspace() {
     conversationRef.current = id;
     setConversationId(id);
     rememberThread(id);
-    if (!same) { pendingScroll.current = null; setMessages([]); setSelectedModelId(null); }
+    if (!same) { pendingScroll.current = null; setMessages([]); setSelectedModelId(null); setQuery(""); }
     try {
       const detail = await getConversation(id, token, controller.signal);
       if (controller.signal.aborted || !mounted.current || historyController.current !== controller) return;
@@ -347,7 +363,7 @@ function Workspace() {
     try {
       await deleteConversation(id, token);
       if (!mounted.current) return;
-      if (conversationId === id) newSearch();
+      if (conversationRef.current === id) newSearch();
       await refreshHistory();
     } catch (error) {
       setError((error as Error).message);
@@ -422,6 +438,8 @@ function Workspace() {
               setConversationId(event.data.conversationId);
               conversationRef.current = event.data.conversationId;
               rememberThread(event.data.conversationId);
+              if (token && event.data.conversationId && location.pathname !== threadPath(event.data.conversationId))
+                navigate(threadPath(event.data.conversationId));
               if (token && event.data.conversationId && selectedRef.current && selectedRef.current !== requestModelId)
                 persistModel(event.data.conversationId, selectedRef.current);
               setRemaining(event.data.remaining);
@@ -511,7 +529,7 @@ function Workspace() {
         />
       )}
       <aside ref={sidebarRef} inert={narrow && !mobileOpen} className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
-        <Link className="brand" to="/dashboard" onClick={newSearch}>
+        <Link className="brand" to="/dashboard">
           <BrandLogo />
         </Link>
         <button
@@ -554,14 +572,13 @@ function Workspace() {
               className={`thread-row ${conversationId === conversation.id ? "selected" : ""}`}
               key={conversation.id}
             >
-              <button
+              <Link
+                to={threadPath(conversation.id)}
                 aria-current={conversationId === conversation.id ? "page" : undefined}
-                disabled={busy}
-                onClick={() => void openThread(conversation.id)}
                 title={conversation.title}
               >
                 {conversation.title}
-              </button>
+              </Link>
               <button
                 disabled={busy}
                 className="delete-thread icon-button"
@@ -572,6 +589,13 @@ function Workspace() {
               </button>
             </div>
           ))}
+          {token && library.hasMore && <div className="library-pagination">
+            {library.moreError && <p role="status" className="sidebar-note">{library.moreError}</p>}
+            <button className="text-button" disabled={library.loadingMore || historyStatus !== "ready"}
+              onClick={() => void library.loadMore()}>
+              {library.loadingMore ? "Loading older conversations…" : library.moreError ? "Retry older conversations" : "Load older conversations"}
+            </button>
+          </div>}
         </nav>
         <div className="sidebar-footer">
           <span className="small-orbit" aria-hidden="true">
@@ -596,7 +620,7 @@ function Workspace() {
 
       <main className="research-main">
         <header className="topbar">
-          <Link className="mobile-brand" to="/dashboard" onClick={newSearch}><BrandMark decorative={false} size={28} /></Link>
+          <Link className="mobile-brand" to="/dashboard"><BrandMark decorative={false} size={28} /></Link>
           <span>
             <Globe size={14} /> Search the web
           </span>
@@ -625,7 +649,11 @@ function Workspace() {
           {threadStatus === "loading" && <ThreadSkeleton />}
           {threadStatus === "refreshing" && <p className="quota-note" role="status">Refreshing conversation…</p>}
           {threadStatus === "ready" && !messages.length && <p className="empty-thread">This conversation has no messages yet. Ask your first question below.</p>}
-          {threadError && <div role="alert" className="error-notice">{threadError}<button className="text-button" onClick={() => conversationId && void openThread(conversationId)}>Retry conversation</button></div>}
+          {threadError && <div role="alert" className="error-notice">{threadError}
+            {token && routeThreadId && validThreadId(routeThreadId) && <button className="text-button" onClick={() => void openThread(routeThreadId)}>Retry conversation</button>}
+            {!token && <Link className="text-button" to={routeThreadId && validThreadId(routeThreadId) ? `/auth?thread=${routeThreadId}` : "/auth"}>Sign in</Link>}
+            <button className="text-button" onClick={newSearch}>Start a new search</button>
+          </div>}
           {!!messages.length && (
             <section className="messages" aria-label="Research conversation">
               {messages.map((message) => (

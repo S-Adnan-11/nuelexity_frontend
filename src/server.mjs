@@ -14,7 +14,7 @@ app.disable("x-powered-by");
 app.get("/config.json", (_req, res) => res.set("Cache-Control", "no-store").json(settings));
 app.use(express.static(root, { index: false }));
 // Missing assets are errors; only application routes use the SPA entry point.
-app.get(["/", "/dashboard", "/auth", "/auth/callback"], (_req, res) => res.sendFile(path.join(root, "index.html")));
+app.get(["/", "/dashboard", "/dashboard/:conversationId", "/auth", "/auth/callback"], (_req, res) => res.sendFile(path.join(root, "index.html")));
 const server = app.listen(Number(process.env.PORT || 3000), () => {
   console.log(`Nuelexity frontend running on port ${server.address().port}`);
 });

@@ -26,8 +26,10 @@ try {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.ok(ready, "Node server startup");
-  for (const route of ["/dashboard", "/auth", "/auth/callback"]) {
-    const html = await (await fetch(base + route)).text();
+  for (const route of ["/dashboard", "/dashboard/33333333-3333-4333-8333-333333333333", "/auth", "/auth/callback"]) {
+    const response = await fetch(base + route);
+    assert.equal(response.status, 200, route);
+    const html = await response.text();
     assert.ok(html.includes("Nuelexity — Follow your curiosity"));
     for (const [, asset] of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
       if (!asset || asset.startsWith("https:")) continue;
@@ -36,6 +38,7 @@ try {
       assert.ok(!response.headers.get("content-type")?.includes("text/html"), asset);
     }
   }
+  assert.equal((await fetch(base + "/assets/missing.js")).status, 404);
   for (const [asset, type] of [
     ["logos/lockup-sage.svg", "image/svg+xml"], ["logos/lockup-ink.svg", "image/svg+xml"],
     ["logos/small-mark-sage.svg", "image/svg+xml"], ["logos/small-mark-ink.svg", "image/svg+xml"],

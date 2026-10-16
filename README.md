@@ -50,7 +50,7 @@ npm run build        # Static files in dist/, including config.json
 npm start        # Production Node server, loads public settings at startup
 ```
 
-Static hosting must include `dist/config.json` and rewrite SPA paths (`/dashboard`, `/auth`, `/auth/callback`) to `index.html`. Configure the backend HTTPS URL before building for deployment. `npm start` serves the built `dist` directory with Node/Express and reads only whitelisted public settings at startup. Build first. Runtime settings override the generated `/config.json` response; static hosts use the build-time `dist/config.json`. No hosting service is selected or provisioned.
+Static hosting must include `dist/config.json` and rewrite SPA paths (`/dashboard`, `/dashboard/<conversation-id>`, `/auth`, `/auth/callback`) to `index.html`. Configure the backend HTTPS URL before building for deployment. `npm start` serves the built `dist` directory with Node/Express and reads only whitelisted public settings at startup. Build first. Runtime settings override the generated `/config.json` response; static hosts use the build-time `dist/config.json`. No hosting service is selected or provisioned.
 
 ## Conversation model selection
 
@@ -68,9 +68,11 @@ See [handoff and frontend tasks](docs/HANDOFF.md). The backend's `docs/API.md` i
 
 Answers render safe Markdown, tables and numbered citations without raw HTML or remote images. User questions align right inside the same reading column; the composer has its own reserved bottom space. Guest invitations wait for auth restoration, use the shared Google/GitHub actions, and remember dismissal for this tab. Guest threads are temporary; saved history requires sign-in.
 
-Auth-pending, initial load, background refresh, successful empty results and failures have separate UI states. Switching accounts replaces all private in-memory state and cancels old requests. Switching threads clears the previous thread immediately; same-thread refresh keeps valid content. Only the active thread ID and scroll offset are stored in tab storage, scoped by user and thread; private messages are fetched from the server.
+Auth-pending, initial load, background refresh, successful empty results and failures have separate UI states. Switching accounts replaces all private in-memory state and cancels old requests. Switching threads clears the previous thread immediately; same-thread refresh keeps valid content. Active thread IDs and scroll offsets are stored in tab storage, scoped by user and thread; private messages are fetched from the server. Signing in from a private URL keeps one validated thread ID in tab storage until the OAuth return, then checks ownership through the backend.
 
-The intended public URL is **https://nuelexity.devs.surf** (owner confirmed; hosting/DNS not configured yet). Canonical/social metadata already uses it. The local implementation report, screenshot evidence and deployment steps are in `docs/RETURN_CAT_IMPLEMENTATION.md`; that report and `docs/evidence/` are intentionally excluded from Git. Nothing was deployed. Paginated library browsing and route-based thread URLs remain future work.
+The intended public URL is **https://nuelexity.devs.surf** (owner confirmed; hosting/DNS not configured yet). Canonical/social metadata already uses it. The local implementation report, screenshot evidence and deployment steps are in `docs/RETURN_CAT_IMPLEMENTATION.md`; that report and `docs/evidence/` are intentionally excluded from Git. Nothing was deployed.
+
+The library loads 30 conversations at a time and offers **Load older conversations**, including retry and end-of-list handling. Refreshes retain all loaded pages. Saved threads have private URLs at `/dashboard/<conversation-id>` with direct loading, refresh and browser back/forward support. Navigation restores each thread's scroll position and aborts a running answer when leaving it. Invalid, deleted and signed-out URLs offer recovery actions. The backend API and database schema are unchanged.
 
 ## Chat refinements
 

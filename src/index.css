@@ -23,7 +23,8 @@ a { color: inherit; text-decoration: none; }
 .thread-row { display: flex; align-items: center; border-radius: 8px; margin: 3px 0; }
 .thread-row:hover, .thread-row.selected { background: var(--nx-surface); }
 .thread-row.selected { box-shadow: inset 2px 0 var(--nx-primary); }
-.thread-row > button:first-child { border: 0; background: none; flex: 1; min-width: 0; min-height: 44px; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; font-size: 12px; }
+.thread-row > a:first-child { display: block; border: 0; background: none; flex: 1; min-width: 0; min-height: 44px; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; font-size: 12px; }
+.library-pagination { padding: 4px 10px; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 8px; padding: 10px; min-width: 40px; min-height: 40px; color: var(--nx-muted); }
 .icon-button:hover { background: var(--nx-surface-raised); color: var(--nx-text); }
 .sidebar-footer { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--nx-divider); padding: 18px 4px 0; margin-top: 18px; }

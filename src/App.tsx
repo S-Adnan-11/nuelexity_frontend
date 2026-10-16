@@ -10,7 +10,7 @@ export function App() {
       <AuthProvider>
         <Routes>
           <Route path="/" element={<RootRedirect />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard/:conversationId?" element={<Dashboard />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/auth/callback" element={<Auth />} />
           <Route path="*" element={<Navigate to="/" replace />} />

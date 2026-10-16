@@ -10,7 +10,7 @@ Your root-redirect/shared-Supabase patch is included at upstream `cd6ac87`. The 
 
 - Responsive search workspace, guest access, Google/GitHub sign-in and callback route.
 - POST-based streaming with source cards, numbered citation links, follow-up context, and a Stop action.
-- Owned conversation history, thread loading and deletion; guest history stays in memory.
+- Owned conversation history with older-page browsing, direct thread URLs, back/forward navigation, loading and deletion; guest history stays in memory.
 - Distinct auth/loading/refresh/empty/error states, thread retry, account/request isolation, safe Markdown and numbered citations.
 - Explicit public environment whitelist. The old Vite-style local Supabase keys are mapped for compatibility, but new settings use `BUN_PUBLIC_*`.
 
@@ -18,10 +18,8 @@ The canonical [API contract](../../../backend/nuelexity_backend/docs/API.md) bel
 
 ## Follow-on work
 
-1. Add paginated library browsing using the existing `offset` contract (the current UI displays the latest 30 threads).
-2. Add route-based thread URLs and back navigation through owned conversation loading.
-3. Verify on physical Android/iOS keyboards and run a full screen-reader audit. Headless Chrome covers narrow layouts, focus, keyboard-sized viewports and reduced motion, but cannot validate physical mobile keyboards.
-4. Finish deployment and OAuth/Turnstile origin configuration described in the implementation report.
+1. Verify on physical Android/iOS keyboards and run a full screen-reader audit. Headless Chrome covers narrow layouts, focus, keyboard-sized viewports and reduced motion, but cannot validate physical mobile keyboards.
+2. Finish deployment and OAuth/Turnstile origin configuration described in the implementation report.
 
 The composer already supports the backend-approved model catalogue, per-thread choice persistence and immutable actual-answer attribution. Public sharing, uploads and paid plans remain outside the API contract. Coordinate any new API/event fields with the backend lead.
 
@@ -40,3 +38,11 @@ Use fake SSE responses for UI iteration; each live search uses limited shared qu
 See [chat refinement implementation and verification](CHAT_REFINEMENTS.md). The main pane owns conversation scrolling; a shared width-constrained column aligns answers and the compact composer. The model menu now uses the existing Radix Select primitive, including guest padlocks, keyboard discovery, a sign-in action and distinct unavailability copy. Visible labels omit the provider suffix while retaining provenance in API/storage.
 
 `follow_ups` still carries `{questions: string[]}`, now zero to three contextual optional questions from the existing completion. Invalid optional payloads become empty arrays. The UI applies questions only to the matching completed answer, and the existing stored array supports reopening. There is no migration or extra model call. Backend `app.ts`, `lib/follow-ups.ts`, `lib/providers.ts` and `prompts.ts` must ship together for generation. Frontend/old-backend operation remains safe: old generic templates are omitted from display, without rewriting history.
+
+## Library and navigation update — 2026-10-16
+
+The library starts with 30 threads and offers **Load older conversations** using the existing `offset` API. Requests advance by returned row count, deduplicate overlapping IDs, stop at a short page or the API's maximum offset, and offer an explicit failed-page retry. Rapid repeated activation makes one request. Refreshes revalidate every loaded page before replacing the visible list. Account replacement/sign-out aborts outstanding pages and discards private state.
+
+Saved threads use `/dashboard/<conversation-id>`. Real links support opening another tab; direct loads, refresh, browser back/forward and New search load through the existing owned API. Each thread retains its scroll position. The old per-user tab pointer is adopted only on initial entry without a thread URL. Assigning a new streaming answer's URL preserves the active request; leaving it aborts the stream. Invalid, missing, deleted and signed-out URLs show recoverable states. Signing in from a private URL remembers only a validated UUID for one OAuth return; it uses the existing callback URL and performs the usual ownership check after sign-in. Blocked tab storage still permits sign-in.
+
+The Node production server serves the SPA on thread URLs; static hosts must rewrite these paths to `index.html`. No backend API, migration or provider configuration changed. `npm run check` and `npm run test:browser` cover pagination/retries/overlap, loaded-page refresh, navigation/scroll, direct URL loading, deletion, streaming cancellation, guest/auth isolation and mocked OAuth return. Real OAuth, physical-device and hosting verification remain external follow-on work.

@@ -21,10 +21,18 @@ const source = { id: 1, title: "A source with a sufficiently long title to test 
 const markdown = '## Follow the evidence\n\nA **clear answer** with *emphasis* and a source [1].\n\n- Read the source\n- Ask another question\n\n| Model | Finding | Evidence | Context | Date | Scope | Method | Notes |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| GPT-OSS | A readable result | Sources | Research | Today | Bounded | Search | Check sources |\n\n```js\nconst sample = "[1]"; // ' + 'x'.repeat(120) + '\n```\n\n<script>window.UNSAFE=true</script>\n\n[unsafe](javascript:alert(1))\n\n![tracking](https://tracker.invalid/pixel)\n\n' + Array.from({length: 10}, (_, i) => `Paragraph ${i+1}: Curiosity starts with a question and continues through the sources.`).join('\n\n');
 const rsaAnswer = "## RSA: the math in three steps\n\nRSA connects prime numbers with modular arithmetic. The public key encrypts a message; the private key recovers it [1].\n\n### 1. Build the keys\n\nChoose two distinct primes, **p** and **q**, and compute **n = p × q**. Choose a public exponent **e** that is coprime to (p − 1)(q − 1). The private exponent **d** is its modular inverse [1].\n\n### 2. Encrypt and decrypt\n\nEncryption computes `c = m^e mod n`. Decryption computes `m = c^d mod n`. The relationship between e and d makes these operations undo each other [1].\n\n### 3. Understand the hard part\n\nKnowing the prime factors lets you calculate the private key. Recovering those factors from a sufficiently large modulus is the difficult step [1].\n\nReal systems also need secure padding and appropriate key sizes. Small examples are useful for learning, but are insecure.";
 const answer = (id: string, content: string) => ({ id, role: "assistant", content, sources: [source, { ...source, id: 2, url: "https://a-very-long-source-hostname.example.test/other" }], followUps: ["What should I explore next?"], status: "complete", created_at: "now", model: models[0], answerKind: "ai" });
-const thread = (id: string) => ({ id, title: id === first ? "First research thread" : "Second research thread", selected_model: models[1]!.id, created_at: "now", updated_at: "now" });
+const thread = (id: string) => ({ id, title: id === first ? "First research thread" : id === second ? "Second research thread" : `Older research ${id.slice(-4)}`, selected_model: models[1]!.id, created_at: "now", updated_at: "now" });
+const olderIds = Array.from({ length: 63 }, (_, index) => `55555555-5555-4555-8555-${String(index).padStart(12, "0")}`);
+const pagedIds = [first, second, ...olderIds];
+// An overlapping row models history reordering between offset requests.
+pagedIds.splice(30, 0, pagedIds[29]!);
+const removedIds = new Set<string>();
+const offsets: number[] = [];
+let failOlder = false, deleteDelay = 0;
 let listDelay = 850, detailDelay = 1100, listMode = "populated", detailMode = "populated", streamPaused = false;
 let configMode = "ready";
 let listCount = 0, detailCount = 0, generationCount = 0;
+let abortedStreams = 0;
 let releaseStream: (() => void) | undefined;
 let appendStream: ((text: string) => void) | undefined;
 let unavailableModel = "";
@@ -46,20 +54,26 @@ const server = await serveFixture(async (req): Promise<Response> => {
   if (url.pathname === "/models") return Response.json({ defaultModelId: models[0]!.id, canSelect: signed, answerMode: "ai", models: models.map((model) => ({...model, available: model.id !== unavailableModel, unavailableReason: model.id === unavailableModel ? "Temporarily unavailable from the provider" : undefined, maxInputBytes: 6000, maxOutputTokens: 1024})) });
   if (url.pathname === "/guest/session") return Response.json({ verified: true, verificationRequired: false, expiresAt: Date.now() + 600000 });
   if (url.pathname === "/conversations") {
+    const offset = Number(url.searchParams.get("offset") || 0); offsets.push(offset);
     const mode = listMode; listCount++; record("library-start"); await delay(listDelay); record("library-done");
     if (mode === "failed") return Response.json({ error: { code: "OFFLINE", message: "Library fixture unavailable." } }, { status: 503 });
+    if (mode === "paged" && failOlder && offset === 30) return Response.json({ error: { code: "OFFLINE", message: "Older threads fixture unavailable." } }, { status: 503 });
+    if (mode === "paged" && !otherAccount) return Response.json({ conversations: pagedIds.filter(id => !removedIds.has(id)).slice(offset, offset + 30).map(thread) });
     return Response.json({ conversations: mode === "empty" || otherAccount ? [] : [thread(first), thread(second)] });
   }
   if (url.pathname.endsWith("/model")) return Response.json({ selectedModelId: (await req.json()).modelId });
   if (url.pathname.startsWith("/conversations/")) {
     const id = url.pathname.split("/").pop()!, mode = detailMode, wait = detailDelay;
+    if (req.method === "DELETE") { await delay(deleteDelay); removedIds.add(id); return new Response(null, { status: 204 }); }
     detailCount++; record(`thread-${id === first ? "A" : "B"}-start`); await delay(wait); record(`thread-${id === first ? "A" : "B"}-done`);
+    if (otherAccount || removedIds.has(id)) return Response.json({ error: { code: "NOT_FOUND", message: "Conversation not found." } }, { status: 404 });
     if (mode === "failed") return Response.json({ error: { code: "OFFLINE", message: "Thread fixture unavailable." } }, { status: 503 });
     if(mode === "rsa") return Response.json({conversation:thread(id),messages:[{id:'rsa-question',role:'user',content:'What is the mathematics behind RSA?',sources:[],followUps:[],status:'complete',created_at:'now'}, {...answer('rsa-answer',rsaAnswer),followUps:rsaQuestions,model:models[2],sources:[{id:1,title:'The mathematics behind RSA',url:'https://example.test/rsa',snippet:'A fictional test source'}]}]});
     return Response.json({ conversation: thread(id), messages: mode === "empty" ? [] : [{ id: "question-"+id, role: "user", content: id === first ? "A long question about curiosity, evidence and how to keep exploring. " + "LongQuestion".repeat(22) : "Second thread question", sources: [], followUps: [], status: "complete", created_at: "now" }, answer(id, id === first ? markdown : "Second thread answer")] });
   }
   if (url.pathname === "/nuelexity_ask") {
     generationCount++;
+    req.signal.addEventListener("abort", () => abortedStreams++, { once: true });
     const request = await req.json();
     const scrolling = request.query === "RSA streaming verification";
     const stream = new ReadableStream({ start(controller) {
@@ -109,7 +123,7 @@ async function key(key: string) {
   await command('Input.dispatchKeyEvent',{type:'keyUp',key,code:key});
   await delay(60);
 }
-async function open(id: string) { await click(`.thread-row button[title="${id === first ? "First" : "Second"} research thread"]`); }
+async function open(id: string) { await click(`.thread-row a[href="/dashboard/${id}"]`); }
 async function submit(question = "Explore the evidence") {
   await evaluate(`(() => { const input = document.querySelector('#question'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(question)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await until(async () => await evaluate(`document.querySelector('[aria-label="Send question"]')?.disabled === false`), "send enabled");
@@ -300,9 +314,111 @@ try {
     await until(async () => await text("Your research will appear here."), "successful empty library"); await shot("library-empty");
     listMode = "populated"; await command("Page.reload");
     await until(async () => await text("First research thread"), "library populated");
+    // A direct URL beats the old tab pointer. Pagination preserves visible rows,
+    // retries only the failed page and advances by raw rows despite overlap.
+    listMode = "paged"; listDelay = 180; detailDelay = 120; offsets.length = 0;
+    await command("Page.navigate", { url: `${server.url}dashboard/${second}` });
+    await until(async () => await text("Second thread answer") && await evaluate("document.querySelectorAll('.thread-row').length === 30"), "direct thread URL and first library page");
+    assert.equal(await evaluate("location.pathname"), `/dashboard/${second}`);
+    assert.equal(await evaluate("document.querySelector('.thread-row a[aria-current=page]').getAttribute('href')"), `/dashboard/${second}`);
+    const more = '.library-pagination button';
+    failOlder = true; await click(more);
+    await until(async () => await text("Older threads fixture unavailable"), "older-page failure");
+    assert.equal(await evaluate("document.querySelectorAll('.thread-row').length"), 30);
+    assert.equal(offsets.at(-1), 30);
+    failOlder = false;
+    const beforeRetry = offsets.length;
+    await evaluate(`document.querySelector('${more}').click();document.querySelector('${more}').click()`);
+    await until(async () => await evaluate("document.querySelectorAll('.thread-row').length === 59"), "deduplicated older page");
+    assert.equal(offsets.length, beforeRetry + 1, "rapid activation fetches one page");
+    assert.equal(offsets.at(-1), 30, "failure does not advance the offset");
+    await click(more);
+    await until(async () => await evaluate("document.querySelectorAll('.thread-row').length === 65"), "final older page");
+    assert.equal(offsets.at(-1), 60, "overlap does not rewind the offset");
+    assert.equal(await evaluate("!!document.querySelector('.library-pagination')"), false);
+    await evaluate("document.querySelector('.thread-list').scrollTop=900");
+    const refreshStart = offsets.length;
+    await evaluate(`(()=>{const channel=new BroadcastChannel('sb-127-auth-token');channel.postMessage({event:'SIGNED_IN',session:${JSON.stringify({...session, access_token: token + '-library'})}});setTimeout(()=>channel.close(),100);})()`);
+    await until(async () => await text("Refreshing library"), "loaded pages revalidation");
+    assert.equal(await evaluate("document.querySelectorAll('.thread-row').length"), 65);
+    await until(async () => !await text("Refreshing library"), "all loaded pages refreshed");
+    assert.deepEqual(offsets.slice(refreshStart), [0, 30, 60]);
+    assert.ok(await evaluate("document.querySelector('.thread-list').scrollTop > 500"));
+    await shot("paginated-library");
+    await open(olderIds.at(-1)!);
+    await until(async () => await evaluate(`location.pathname === '/dashboard/${olderIds.at(-1)}' && !document.querySelector('[aria-label="Loading conversation"]')`), "open older-page thread");
+    await open(first); await until(async () => await text("Follow the evidence"), "first route");
+    await evaluate("document.querySelector('.conversation-scroll').scrollTop=230"); await delay(80);
+    await open(second); await until(async () => await text("Second thread answer"), "second route");
+    await evaluate("history.back()");
+    await until(async () => await evaluate(`location.pathname === '/dashboard/${first}'`) && await text("Follow the evidence"), "browser back restores first thread");
+    assert.ok(await evaluate("document.querySelector('.conversation-scroll').scrollTop > 150"));
+    await evaluate("history.forward()");
+    await until(async () => await evaluate(`location.pathname === '/dashboard/${second}'`) && await text("Second thread answer"), "browser forward restores second thread");
+    await click('.new-search');
+    await until(async () => await evaluate("location.pathname === '/dashboard' && !document.querySelector('.messages')"), "new search has its own history entry");
+    await evaluate("history.back()");
+    await until(async () => await text("Second thread answer"), "back from new search");
+    await command("Page.reload");
+    await until(async () => await text("Second thread answer"), "direct URL refresh");
+    const beforeInvalid = detailCount;
+    await command("Page.navigate", { url: `${server.url}dashboard/not-a-thread` });
+    await until(async () => await text("This conversation URL is invalid"), "invalid URL state");
+    assert.equal(detailCount, beforeInvalid);
+    assert.equal(await evaluate("!!document.querySelector('.messages')"), false);
+    const missing = "66666666-6666-4666-8666-666666666666";
+    removedIds.add(missing);
+    await command("Page.navigate", { url: `${server.url}dashboard/${missing}` });
+    await until(async () => await text("Conversation not found"), "missing/private thread state");
+    assert.equal(await evaluate("!!document.querySelector('.messages')"), false);
+    await click('.new-search');
+    await until(async () => await evaluate("document.querySelector('.suggestion-list button')?.disabled === false"), "home ready after missing thread");
+    const beforeStreamDetail = detailCount, beforeAbort = abortedStreams;
+    streamPaused = true; await submit('RSA streaming verification');
+    await until(async () => await text('RSA key generation') && await evaluate(`location.pathname === '/dashboard/${first}'`), 'new answer receives a thread URL');
+    assert.equal(detailCount, beforeStreamDetail, "assigning a URL must preserve the running answer");
+    await evaluate("history.back()");
+    await until(async () => await evaluate("location.pathname === '/dashboard' && !document.querySelector('.messages')"), "back cancels streaming");
+    await until(async () => abortedStreams > beforeAbort, "navigation abort reaches the server");
+    releaseStream!(); await delay(200);
+    assert.equal(await evaluate("!!document.querySelector('.messages')"), false);
+    await evaluate("history.forward()");
+    await until(async () => await text("Follow the evidence"), "forward loads the saved thread instead of stale stream updates");
+    await evaluate("window.confirm=()=>true");
+    await click(`[aria-label="Delete First research thread"]`);
+    await until(async () => await evaluate("location.pathname === '/dashboard'") && !await text("First research thread"), "deleting active thread returns home");
+    await evaluate("history.back()");
+    await until(async () => await text("Conversation not found"), "back to a deleted thread is recoverable");
+    await click('.new-search');
+    // Deletion may finish after navigating into the thread from the home route.
+    deleteDelay = 650;
+    await click('[aria-label="Delete Older research 0000"]');
+    await open(olderIds[0]!);
+    await until(async () => await evaluate(`location.pathname === '/dashboard/${olderIds[0]}'`) && await text('Second thread answer'), "open a thread while deletion is pending");
+    await until(async () => await evaluate("location.pathname === '/dashboard' && !document.querySelector('.messages')"), "late deletion also clears the current URL");
+    deleteDelay = 0;
+    await until(async () => await evaluate("!!document.querySelector('.library-pagination button:not(:disabled)')"), "library ready before sign-out race");
+    listDelay = 650; await click(more);
     // Only the allowed OAuth buttons are present, and both invoke Supabase PKCE.
     await click('[aria-label="Sign out"]');
     await until(async () => await text("Guest workspace"), "guest reset");
+    await delay(800);
+    assert.equal(await evaluate("document.querySelectorAll('.thread-row').length"), 0, "late older-page response stays private");
+    const guestDetailCount = detailCount;
+    await command("Page.navigate", { url: `${server.url}dashboard/${second}` });
+    await until(async () => await text("Sign in to open a saved conversation"), "signed-out private URL");
+    assert.equal(detailCount, guestDetailCount, "guest URLs never request private history");
+    await click('.error-notice a');
+    await until(async () => await text('Continue with Google'), "sign-in from private URL");
+    assert.equal(await evaluate("sessionStorage.getItem('nuelexity:sign-in-thread')"), second);
+    await evaluate(`localStorage.setItem('sb-127-auth-token', ${JSON.stringify(JSON.stringify(session))})`);
+    await command("Page.navigate", { url: `${server.url}auth/callback` });
+    await until(async () => await evaluate(`location.pathname === '/dashboard/${second}'`) && await text('Second thread answer'), "OAuth return resumes the requested private URL");
+    assert.equal(await evaluate("sessionStorage.getItem('nuelexity:sign-in-thread')"), null);
+    await click('[aria-label="Sign out"]');
+    await until(async () => await text("Guest workspace"), "guest after private URL sign-in");
+    await click('.new-search');
+    await until(async () => await evaluate("location.pathname === '/dashboard'"), "guest private-URL recovery");
     await evaluate("sessionStorage.removeItem('nuelexity:guest-invitation-dismissed')"); await command("Page.reload");
     await until(async () => await text("Make room for"), "guest card reset");
     await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -362,7 +478,7 @@ try {
     await until(async () => await text('Sign-in setup is incomplete'),'unconfigured auth'); await shot('auth-unconfigured');
     configMode = 'ready';
     await writeFile(path.join(evidence,"after-timeline.json"), JSON.stringify({ observations: before, timeline, listCount, detailCount, generationCount }, null, 2));
-    console.log("PASS research browser: delayed auth/refresh, pending/failed/empty states, same-user revalidation/scroll, thread races, sign-out during load, guest dismissal, Google/GitHub OAuth, Markdown/stream/cancel, mobile/keyboard-sized viewport, reduced motion and asset loads. All services mocked.");
+    console.log("PASS research browser: paginated library/retries/overlap/refresh, direct thread URLs, back/forward/scroll, invalid/deleted/guest URLs, navigation abort, account isolation, auth/loading races, Markdown, mobile/keyboard viewports and OAuth wiring. All services mocked.");
     console.log(JSON.stringify({ timeline: timeline.slice(0, 7), evidence, generationCount }));
   }
   await command("Page.removeScriptToEvaluateOnNewDocument", { identifier: injection.identifier });

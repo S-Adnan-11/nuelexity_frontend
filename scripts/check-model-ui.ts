@@ -143,7 +143,7 @@ try {
   await until(async () => await evaluate("!!document.querySelector('[role=listbox]')"), "initial menu");
   assert.ok(await evaluate("document.querySelectorAll('[role=option]')[2].textContent.includes('Preview')"));
   await key("Escape");
-  await evaluate("Array.from(document.querySelectorAll('.thread-row button')).find(button => button.title === 'Browser verification').click()");
+  await evaluate("Array.from(document.querySelectorAll('.thread-row a')).find(link => link.title === 'Browser verification').click()");
   await until(async () => await evaluate("document.body.innerText.includes('Model unknown')"), "legacy attribution");
   await choose(2);
   assert.equal(selected, models[2]!.id);
@@ -168,7 +168,7 @@ try {
   assert.equal(await evaluate("Array.from(document.querySelectorAll('.answer-model')).some(el => /Groq|Served by|via /i.test(el.textContent))"), false);
   await evaluate("document.querySelector('.new-search').click()");
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)}`), "new conversation uses default");
-  await evaluate("Array.from(document.querySelectorAll('.thread-row button')).find(button => button.title === 'Browser verification').click()");
+  await evaluate("Array.from(document.querySelectorAll('.thread-row a')).find(link => link.title === 'Browser verification').click()");
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[1]!.id)}`), "reopening restores model");
   failNextSave = true;
   await choose(0);
@@ -178,7 +178,7 @@ try {
   await until(async () => await evaluate("!document.body.innerText.includes('Your choice was not saved') && !document.body.innerText.includes('Saving model choice')"), "manual save retry");
   assert.equal(selected, models[0]!.id);
   selected = "retired/model";
-  await evaluate("document.querySelector('.new-search').click(); Array.from(document.querySelectorAll('.thread-row button')).find(button => button.title === 'Browser verification').click()");
+  await evaluate("document.querySelector('.new-search').click(); Array.from(document.querySelectorAll('.thread-row a')).find(link => link.title === 'Browser verification').click()");
   await until(async () => await evaluate("document.querySelector('#chat-model')?.value === 'retired/model'"), "retired stored selection");
   assert.ok(await evaluate("document.querySelector('[aria-label=\"Send question\"]').disabled"));
   assert.ok(await evaluate("document.body.innerText.includes('Choose an available model.')"));
