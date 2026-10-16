@@ -1,4 +1,4 @@
-# dependencies (bun install)
+# dependencies
 node_modules
 
 # output
@@ -42,3 +42,7 @@ supabase/.branches/
 AGENTS.md
 docs/evidence/
 docs/RETURN_CAT_IMPLEMENTATION.md
+
+# npm lock is canonical; optional Bun installs must not add a second lock.
+bun.lock
+bun.lockb

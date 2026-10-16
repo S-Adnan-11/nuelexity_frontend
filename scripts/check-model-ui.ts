@@ -1,3 +1,4 @@
+import { serveFixture, staticResponse, launchChrome } from "./http-fixture";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,7 +18,7 @@ const messages: any[] = [{ id: "legacy", role: "assistant", content: "An older a
 const conversation = () => ({ id: thread, title: "Browser verification", selected_model: selected, created_at: "now", updated_at: "now" });
 const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 const user = { id: owner, aud: "authenticated", role: "authenticated", email: "browser@example.test", user_metadata: {}, app_metadata: { provider: "google" }, created_at: "now" };
-const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req): Promise<Response> {
+const server = await serveFixture(async (req): Promise<Response> => {
   const url = new URL(req.url), signed = !!req.headers.get("Authorization");
   if (url.pathname === "/config.json") return Response.json({ BUN_PUBLIC_BACKEND_URL: server.url.origin,
     BUN_PUBLIC_SUPABASE_URL: `${server.url.origin}/supabase`, BUN_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "browser-fixture-key", BUN_PUBLIC_TURNSTILE_SITE_KEY: "" });
@@ -67,12 +68,10 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req): Pro
     }});
     return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
   }
-  const candidate = path.resolve("dist", url.pathname.slice(1));
-  const file = candidate.startsWith(path.resolve("dist") + path.sep) ? Bun.file(candidate) : null;
-  return new Response(file && await file.exists() ? file : Bun.file("dist/index.html"));
-}});
+  return staticResponse("dist", url.pathname);
+});
 const profile = await mkdtemp(path.join(tmpdir(), "nuelexity-model-browser-"));
-const chrome = Bun.spawn([process.env.CHROME_BIN || "/usr/bin/google-chrome", "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdout: "ignore", stderr: "ignore" });
+const chrome = launchChrome(profile);
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
 let socket: WebSocket | undefined, sequence = 0;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -95,14 +94,16 @@ async function evaluate(expression: string) {
   return result.result.value;
 }
 async function key(key: string, code = key) {
-  await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: key === "Enter" ? 13 : key === "Tab" ? 9 : key === "ArrowDown" ? 40 : 38 });
+  await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: ({ Enter:13, Tab:9, ArrowDown:40, ArrowUp:38, Home:36, End:35, Escape:27 } as Record<string,number>)[key] ?? 0 });
   await command("Input.dispatchKeyEvent", { type: "keyUp", key, code });
 }
 async function choose(index: number) {
   await evaluate("document.querySelector('#chat-model').focus()");
-  const current = await evaluate("document.querySelector('#chat-model').selectedIndex");
-  for (let i = current; i < index; i++) await key("ArrowDown");
-  for (let i = current; i > index; i--) await key("ArrowUp");
+  await key("Enter");
+  await until(async () => await evaluate("!!document.querySelector('[role=listbox]')"), "model menu opens");
+  await key("Home"); await delay(60);
+  for (let i = 0; i < index; i++) { await key("ArrowDown"); await delay(60); }
+  await key("Enter");
   await until(async () => await evaluate(`document.querySelector('#chat-model').value === ${JSON.stringify(models[index]!.id)}`), "keyboard selection");
   await until(async () => await evaluate("!document.body.innerText.includes('Saving model choice')"), "choice saved");
 }
@@ -136,9 +137,12 @@ try {
   await evaluate("document.querySelector('#question').focus()");
   await key("Tab");
   assert.equal(await evaluate("document.activeElement.id"), "chat-model");
-  assert.equal(await evaluate("document.querySelector('#chat-model').labels[0].textContent"), "Model");
+  assert.equal(await evaluate("document.querySelector('#chat-model').getAttribute('aria-label')"), "Choose a model");
   assert.equal(await evaluate("document.querySelector('#chat-model').value"), models[0]!.id);
-  assert.ok(await evaluate("document.querySelector('#chat-model').options[2].text.includes('Preview')"));
+  await key("Enter");
+  await until(async () => await evaluate("!!document.querySelector('[role=listbox]')"), "initial menu");
+  assert.ok(await evaluate("document.querySelectorAll('[role=option]')[2].textContent.includes('Preview')"));
+  await key("Escape");
   await evaluate("Array.from(document.querySelectorAll('.thread-row button')).find(button => button.title === 'Browser verification').click()");
   await until(async () => await evaluate("document.body.innerText.includes('Model unknown')"), "legacy attribution");
   await choose(2);
@@ -153,14 +157,15 @@ try {
   assert.equal(await evaluate("document.querySelector('#chat-model').value"), models[0]!.id);
   await submit("next"); await idle();
   assert.equal(requests[1], models[0]!.id);
-  assert.ok(await evaluate("document.body.innerText.includes('GPT-OSS 20B ·')"));
+  assert.ok(await evaluate("document.body.innerText.includes('GPT-OSS 20B')"));
   await choose(1);
   await submit("larger model"); await idle();
-  assert.equal(requests[2], models[1]!.id);
-  assert.ok(await evaluate("document.body.innerText.includes('GPT-OSS 120B ·')"));
+  assert.equal(requests[2], models[1]!.id); //120 B params
+  assert.ok(await evaluate("document.body.innerText.includes('GPT-OSS 120B')"));
 
   await command("Page.reload");
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[1]!.id)} && document.body.innerText.includes('Model unknown')`), "refresh restores conversation and choice");
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('.answer-model')).some(el => /Groq|Served by|via /i.test(el.textContent))"), false);
   await evaluate("document.querySelector('.new-search').click()");
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)}`), "new conversation uses default");
   await evaluate("Array.from(document.querySelectorAll('.thread-row button')).find(button => button.title === 'Browser verification').click()");
@@ -177,10 +182,13 @@ try {
   await until(async () => await evaluate("document.querySelector('#chat-model')?.value === 'retired/model'"), "retired stored selection");
   assert.ok(await evaluate("document.querySelector('[aria-label=\"Send question\"]').disabled"));
   assert.ok(await evaluate("document.body.innerText.includes('Choose an available model.')"));
-  await evaluate(`(() => { const select = document.querySelector('#chat-model'); select.value = ${JSON.stringify(models[0]!.id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await choose(0);
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)} && !document.body.innerText.includes('Saving model choice')`), "explicit recovery from retired selection");
   await choose(2); await submit("permission"); await idle();
-  await until(async () => await evaluate("document.querySelector('#chat-model').options[2].disabled"), "permission recovery");
+  await evaluate("document.querySelector('#chat-model').focus()");
+  await key("Enter");
+  await until(async () => await evaluate("document.querySelectorAll('[role=option]')[2]?.getAttribute('aria-disabled') === 'true'"), "permission recovery");
+  await key("Escape");
   assert.ok(await evaluate("document.querySelector('[aria-label=\"Send question\"]').disabled"));
   assert.ok(await evaluate("document.body.innerText.includes('Incomplete')"));
   await choose(1); await submit("recovered"); await idle();
@@ -196,18 +204,18 @@ try {
   await key("Tab");
   assert.notEqual(await evaluate("document.activeElement.id"), "chat-model");
   const screenshot = await command("Page.captureScreenshot", { format: "png" });
-  await writeFile("/tmp/nuelexity-model-selector-mobile.png", Buffer.from(screenshot.data, "base64"));
+  await writeFile(path.join(tmpdir(), "nuelexity-model-selector-mobile.png"), Buffer.from(screenshot.data, "base64"));
   await evaluate("sessionStorage.setItem('fixture-signed-out','1'); document.querySelector('[aria-label=\"Sign out\"]').click()");
-  await until(async () => await evaluate("document.querySelector('#chat-model')?.disabled === true && document.body.innerText.includes('Sign in to access more models')"), "sign-out returns guest behavior");
+  await until(async () => await evaluate("document.querySelector('#chat-model')?.dataset.canSelect === 'false' && document.querySelector('#chat-model')?.disabled === false"), "sign-out returns guest behavior");
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)}`), "guest catalogue loaded");
   assert.equal(await evaluate("document.querySelector('#chat-model').value"), models[0]!.id);
   assert.ok(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"));
   const guestScreenshot = await command("Page.captureScreenshot", { format: "png" });
-  await writeFile("/tmp/nuelexity-model-selector-guest.png", Buffer.from(guestScreenshot.data, "base64"));
+  await writeFile(path.join(tmpdir(), "nuelexity-model-selector-guest.png"), Buffer.from(guestScreenshot.data, "base64"));
   await command("Page.removeScriptToEvaluateOnNewDocument", { identifier: injected.identifier });
   console.log("PASS production browser: desktop/mobile, keyboard selection and Tab, persistence across refresh/reopening, frozen generation, legacy attribution, failed-save/retired-model/permission/interruption/quota recovery, sign-out/default behavior. All auth/provider calls mocked.");
   console.log(`Mock generation submissions: ${requests.length}; mobile screenshot: /tmp/nuelexity-model-selector-mobile.png`);
 } finally {
-  socket?.close(); chrome.kill(); await chrome.exited; server.stop(true);
-  await rm(profile, { recursive: true, force: true });
+  socket?.close(); chrome.kill(); await chrome.exited; server.stop();
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

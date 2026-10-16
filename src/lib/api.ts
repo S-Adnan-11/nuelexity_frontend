@@ -3,6 +3,7 @@ import { readSearchEvents } from "./stream";
 import type { Conversation, Message, ModelCatalogue, SearchEvent } from "./types";
 import { isModelAttribution } from "./models";
 import { guestPassStore } from "./guest-pass";
+import { safeFollowUps } from "./follow-ups";
 
 export class ApiError extends Error {
   constructor(
@@ -51,7 +52,8 @@ export async function getConversation(
   signal?: AbortSignal,
 ): Promise<{ conversation: Conversation; messages: Message[] }> {
   const response = await request(`/conversations/${encodeURIComponent(id)}`, token, { signal });
-  return response.json();
+  const detail = await response.json() as { conversation: Conversation; messages: Message[] };
+  return { ...detail, messages: detail.messages.map(message => ({ ...message, followUps: safeFollowUps(message.followUps) })) };
 }
 export async function deleteConversation(id: string, token: string) {
   await request(`/conversations/${encodeURIComponent(id)}`, token, { method: "DELETE" });

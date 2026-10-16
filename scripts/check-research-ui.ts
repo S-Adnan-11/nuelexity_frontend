@@ -1,3 +1,4 @@
+import { serveFixture, staticResponse, launchChrome } from "./http-fixture";
 import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +7,8 @@ import { strict as assert } from "node:assert";
 // Test-only identities and answers; never connect this fixture to real services.
 const baseline = process.argv.includes("--baseline");
 const dist = process.env.BROWSER_DIST || "dist";
-const evidence = process.env.BROWSER_EVIDENCE || "/tmp/nuelexity-research-evidence";
+const evidence = process.env.BROWSER_EVIDENCE || path.join(tmpdir(), "nuelexity-research-evidence");
+const rsaQuestions = ["Can you walk me through RSA key generation with small numbers?", "Why does RSA decryption recover the original message?", "How does factoring the modulus help reveal the private key?"];
 const owner = "11111111-1111-4111-8111-111111111111";
 const first = "33333333-3333-4333-8333-333333333333", second = "44444444-4444-4444-8444-444444444444";
 const models = [
@@ -16,18 +18,21 @@ const models = [
 ];
 const user = { id: owner, aud: "authenticated", role: "authenticated", email: "fixture@example.test", user_metadata: {}, app_metadata: { provider: "google" }, created_at: "now" };
 const source = { id: 1, title: "A source with a sufficiently long title to test wrapping", url: "https://example.test/research", snippet: "Fixture" };
-const markdown = '## Follow the evidence\n\nA **clear answer** with *emphasis* and a source [1].\n\n- Read the source\n- Ask another question\n\n| Model | Finding |\n| --- | --- |\n| GPT-OSS | A readable result |\n\n```js\nconst sample = "[1]"; // ' + 'x'.repeat(120) + '\n```\n\n<script>window.UNSAFE=true</script>\n\n[unsafe](javascript:alert(1))\n\n![tracking](https://tracker.invalid/pixel)\n\n' + Array.from({length: 10}, (_, i) => `Paragraph ${i+1}: Curiosity starts with a question and continues through the sources.`).join('\n\n');
+const markdown = '## Follow the evidence\n\nA **clear answer** with *emphasis* and a source [1].\n\n- Read the source\n- Ask another question\n\n| Model | Finding | Evidence | Context | Date | Scope | Method | Notes |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| GPT-OSS | A readable result | Sources | Research | Today | Bounded | Search | Check sources |\n\n```js\nconst sample = "[1]"; // ' + 'x'.repeat(120) + '\n```\n\n<script>window.UNSAFE=true</script>\n\n[unsafe](javascript:alert(1))\n\n![tracking](https://tracker.invalid/pixel)\n\n' + Array.from({length: 10}, (_, i) => `Paragraph ${i+1}: Curiosity starts with a question and continues through the sources.`).join('\n\n');
+const rsaAnswer = "## RSA: the math in three steps\n\nRSA connects prime numbers with modular arithmetic. The public key encrypts a message; the private key recovers it [1].\n\n### 1. Build the keys\n\nChoose two distinct primes, **p** and **q**, and compute **n = p × q**. Choose a public exponent **e** that is coprime to (p − 1)(q − 1). The private exponent **d** is its modular inverse [1].\n\n### 2. Encrypt and decrypt\n\nEncryption computes `c = m^e mod n`. Decryption computes `m = c^d mod n`. The relationship between e and d makes these operations undo each other [1].\n\n### 3. Understand the hard part\n\nKnowing the prime factors lets you calculate the private key. Recovering those factors from a sufficiently large modulus is the difficult step [1].\n\nReal systems also need secure padding and appropriate key sizes. Small examples are useful for learning, but are insecure.";
 const answer = (id: string, content: string) => ({ id, role: "assistant", content, sources: [source, { ...source, id: 2, url: "https://a-very-long-source-hostname.example.test/other" }], followUps: ["What should I explore next?"], status: "complete", created_at: "now", model: models[0], answerKind: "ai" });
 const thread = (id: string) => ({ id, title: id === first ? "First research thread" : "Second research thread", selected_model: models[1]!.id, created_at: "now", updated_at: "now" });
 let listDelay = 850, detailDelay = 1100, listMode = "populated", detailMode = "populated", streamPaused = false;
 let configMode = "ready";
 let listCount = 0, detailCount = 0, generationCount = 0;
 let releaseStream: (() => void) | undefined;
+let appendStream: ((text: string) => void) | undefined;
+let unavailableModel = "";
 const timeline: { event: string; ms: number }[] = [];
 let start = performance.now();
 const record = (event: string) => timeline.push({ event, ms: Math.round(performance.now() - start) });
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req): Promise<Response> {
+const server = await serveFixture(async (req): Promise<Response> => {
   const url = new URL(req.url);
   const signed = !!req.headers.get("Authorization");
   const otherAccount = req.headers.get("Authorization")?.endsWith("other-account");
@@ -38,7 +43,7 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req): Pro
     if (url.pathname.endsWith("/token")) { record("auth-refresh-start"); await delay(500); record("auth-refresh-done"); return Response.json(session); }
     return Response.json(user);
   }
-  if (url.pathname === "/models") return Response.json({ defaultModelId: models[0]!.id, canSelect: signed, answerMode: "ai", models: models.map((model) => ({...model, available: true, maxInputBytes: 6000, maxOutputTokens: 1024})) });
+  if (url.pathname === "/models") return Response.json({ defaultModelId: models[0]!.id, canSelect: signed, answerMode: "ai", models: models.map((model) => ({...model, available: model.id !== unavailableModel, unavailableReason: model.id === unavailableModel ? "Temporarily unavailable from the provider" : undefined, maxInputBytes: 6000, maxOutputTokens: 1024})) });
   if (url.pathname === "/guest/session") return Response.json({ verified: true, verificationRequired: false, expiresAt: Date.now() + 600000 });
   if (url.pathname === "/conversations") {
     const mode = listMode; listCount++; record("library-start"); await delay(listDelay); record("library-done");
@@ -50,30 +55,31 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(req): Pro
     const id = url.pathname.split("/").pop()!, mode = detailMode, wait = detailDelay;
     detailCount++; record(`thread-${id === first ? "A" : "B"}-start`); await delay(wait); record(`thread-${id === first ? "A" : "B"}-done`);
     if (mode === "failed") return Response.json({ error: { code: "OFFLINE", message: "Thread fixture unavailable." } }, { status: 503 });
+    if(mode === "rsa") return Response.json({conversation:thread(id),messages:[{id:'rsa-question',role:'user',content:'What is the mathematics behind RSA?',sources:[],followUps:[],status:'complete',created_at:'now'}, {...answer('rsa-answer',rsaAnswer),followUps:rsaQuestions,model:models[2],sources:[{id:1,title:'The mathematics behind RSA',url:'https://example.test/rsa',snippet:'A fictional test source'}]}]});
     return Response.json({ conversation: thread(id), messages: mode === "empty" ? [] : [{ id: "question-"+id, role: "user", content: id === first ? "A long question about curiosity, evidence and how to keep exploring. " + "LongQuestion".repeat(22) : "Second thread question", sources: [], followUps: [], status: "complete", created_at: "now" }, answer(id, id === first ? markdown : "Second thread answer")] });
   }
   if (url.pathname === "/nuelexity_ask") {
     generationCount++;
+    const request = await req.json();
+    const scrolling = request.query === "RSA streaming verification";
     const stream = new ReadableStream({ start(controller) {
       const send = (event: string, data: unknown) => controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       send("meta", { requestId: "fixture", conversationId: signed ? first : null, answerMode: "ai", remaining: 2 });
       send("sources", { sources: [source] });
-      send("delta", { text: "A **stream" });
-      releaseStream = () => { try { send("delta", { text: "ed answer** [1]." }); send("done", { conversationId: signed ? first : null, model: models[1], answerKind: "ai" }); controller.close(); } catch {} };
+      appendStream = text => send("delta", {text});
+      send("delta", { text: scrolling ? "RSA key generation uses prime factors and modular arithmetic [1].\n\n" + "A grounded RSA explanation.\n\n".repeat(80) : "A **stream" });
+      releaseStream = () => { try { send("delta", { text: scrolling ? "A completed RSA explanation." : "ed answer** [1]." }); if(scrolling) send("follow_ups", {questions:rsaQuestions}); send("done", { conversationId: signed ? first : null, model: models[1], answerKind: "ai" }); controller.close(); } catch {} };
       if (!streamPaused) setTimeout(releaseStream, 100);
     }});
     return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
   }
-  const name = url.pathname.slice(1);
-  const candidate = path.resolve(dist, name);
-  const file = candidate.startsWith(path.resolve(dist) + path.sep) ? Bun.file(candidate) : null;
-  return new Response(file && await file.exists() ? file : Bun.file(path.join(dist, "index.html")));
-}});
+  return staticResponse(dist, url.pathname);
+});
 const exp = Math.floor(Date.now() / 1000) + 3600;
 const token = `${Buffer.from('{"alg":"HS256"}').toString("base64url")}.${Buffer.from(JSON.stringify({ sub: owner, role: "authenticated", aud: "authenticated", exp })).toString("base64url")}.fixture-signature`;
 const session = { access_token: token, refresh_token: "fixture-refresh", token_type: "bearer", expires_at: exp, expires_in: 3600, user };
 const profile = await mkdtemp(path.join(tmpdir(), "nuelexity-research-browser-"));
-const chrome = Bun.spawn([process.env.CHROME_BIN || "/usr/bin/google-chrome", "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdout: "ignore", stderr: "ignore" });
+const chrome = launchChrome(profile);
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
 let socket: WebSocket | undefined, sequence = 0;
 const command = (method: string, params: Record<string, unknown> = {}) => new Promise<any>((resolve, reject) => {
@@ -97,9 +103,15 @@ async function shot(name: string) {
 }
 const text = (value: string) => evaluate(`(document.body?.innerText.includes(${JSON.stringify(value)}) ?? false)`);
 const click = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+async function key(key: string) {
+  const code=({Enter:13,ArrowDown:40,ArrowUp:38,Escape:27,Home:36,End:35,Tab:9} as Record<string,number>)[key] ?? 0;
+  await command('Input.dispatchKeyEvent',{type:'keyDown',key,code:key,windowsVirtualKeyCode:code});
+  await command('Input.dispatchKeyEvent',{type:'keyUp',key,code:key});
+  await delay(60);
+}
 async function open(id: string) { await click(`.thread-row button[title="${id === first ? "First" : "Second"} research thread"]`); }
-async function submit() {
-  await evaluate(`(() => { const input = document.querySelector('#question'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, 'Explore the evidence'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+async function submit(question = "Explore the evidence") {
+  await evaluate(`(() => { const input = document.querySelector('#question'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(question)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await until(async () => await evaluate(`document.querySelector('[aria-label="Send question"]')?.disabled === false`), "send enabled");
   await click('[aria-label="Send question"]');
 }
@@ -156,6 +168,16 @@ try {
     await evaluate("document.fonts.ready");
     assert.ok(await evaluate("document.fonts.check('16px Manrope') && document.fonts.check('36px \"DM Serif Display\"')"));
     assert.deepEqual(await evaluate("performance.getEntriesByType('resource').filter(entry => entry.name.startsWith('http') && new URL(entry.name).origin !== location.origin).map(entry => entry.name)"), []);
+    const layout = await evaluate(`(() => {
+      const pane=document.querySelector('.research-main').getBoundingClientRect(), scroll=document.querySelector('.conversation-scroll'), column=document.querySelector('.messages').getBoundingClientRect(), composer=document.querySelector('.composer').getBoundingClientRect();
+      return {paneRight:pane.right,scrollRight:scroll.getBoundingClientRect().right,readingWidth:column.width,composerWidth:composer.width,columnLeft:column.left,composerLeft:composer.left,nested:getComputedStyle(document.querySelector('.reading-column')).overflowY,composerHeight:composer.height};
+    })()`);
+    assert.ok(Math.abs(layout.paneRight-layout.scrollRight)<1,JSON.stringify(layout));
+    assert.ok(layout.readingWidth>=830 && layout.readingWidth<=880,JSON.stringify(layout));
+    assert.ok(Math.abs(layout.readingWidth-layout.composerWidth)<1 && Math.abs(layout.columnLeft-layout.composerLeft)<=1,JSON.stringify(layout));
+    assert.ok(await evaluate("(()=>{const table=document.querySelector('.table-scroll'),code=document.querySelector('.answer-text pre');return table.scrollWidth>table.clientWidth && code.scrollWidth>code.clientWidth && document.documentElement.scrollWidth<=innerWidth;})()"));
+    assert.equal(layout.nested,'visible'); assert.ok(layout.composerHeight<140,JSON.stringify(layout));
+    await writeFile(path.join(evidence,'layout.json'),JSON.stringify(layout,null,2));
     await shot("desktop-conversation");
     await evaluate("document.querySelector('.conversation-scroll').scrollTop=100000"); await delay(80);
     assert.ok(await evaluate("document.querySelector('.message.assistant:last-child').getBoundingClientRect().bottom <= document.querySelector('.composer').getBoundingClientRect().top"));
@@ -188,6 +210,36 @@ try {
     await until(async () => await text("This conversation has no messages yet"), "successful empty thread"); await shot("thread-empty");
     detailMode = "populated"; await open(first);
     await until(async () => await text("Follow the evidence"), "thread recovery");
+    // Stream following respects the reader's position and suggestions submit once.
+    streamPaused=true; await submit('RSA streaming verification');
+    await until(async()=>await text('RSA key generation'),'RSA stream started');
+    await evaluate("document.querySelector('.conversation-scroll').scrollTop=0"); await delay(100);
+    appendStream!('More RSA context.\n\n'.repeat(30)); await delay(100);
+    assert.ok(await evaluate("document.querySelector('.conversation-scroll').scrollTop < 5"));
+    await evaluate("document.querySelector('.conversation-scroll').scrollTop=100000"); await delay(100);
+    appendStream!('More modular arithmetic.\n\n'.repeat(30)); await delay(100);
+    assert.ok(await evaluate("(()=>{const s=document.querySelector('.conversation-scroll');return s.scrollHeight-s.scrollTop-s.clientHeight<20})()"));
+    releaseStream!(); await until(async()=>await evaluate("!document.querySelector('[aria-label=\"Stop search\"]')"),'RSA complete');
+    assert.ok(await text(rsaQuestions[0]!));
+    assert.equal(await evaluate("Array.from(document.querySelectorAll('.answer-model')).some(el=>/Groq|Served by|via /i.test(el.textContent))"),false);
+    await delay(100); await shot('contextual-follow-ups');
+    const previousGenerations=generationCount;
+    await evaluate("(()=>{const button=Array.from(document.querySelectorAll('.follow-ups button')).find(b=>b.textContent.includes('RSA key generation'));button.click();button.click();})()");
+    await until(async()=>generationCount>previousGenerations,'suggestion submission');
+    assert.equal(generationCount,previousGenerations+1); releaseStream!();
+    await until(async()=>await evaluate("!document.querySelector('[aria-label=\"Stop search\"]')"),'suggestion answer complete');
+    await open(first); await until(async()=>await text('Follow the evidence'),'restore after stream verification');
+    // Representative app screenshots use a clearly fictional RSA response fixture.
+    detailMode='rsa'; await open(first); await until(async()=>await text('RSA: the math in three steps'),'RSA history fixture');
+    await evaluate("document.querySelector('.conversation-scroll').scrollTop=0"); await shot('desktop-rsa');
+    await evaluate("document.querySelector('#chat-model').focus()"); await key('Enter');
+    await until(async()=>await evaluate("!!document.querySelector('[role=listbox]')"),'desktop model menu');
+    await shot('desktop-model-menu'); await key('Escape');
+    await command('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true}); await delay(300);
+    await shot('mobile-rsa');
+    await evaluate("document.querySelector('#chat-model').focus()"); await key('Enter');
+    await until(async()=>await evaluate("!!document.querySelector('[role=listbox]')"),'mobile model menu'); await shot('mobile-model-menu'); await key('Escape');
+    detailMode='populated'; await open(first); await until(async()=>await text('Follow the evidence'),'restore general fixture');
     // Narrow layout, long text/code/tables and keyboard-sized viewport.
     await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await delay(300); assert.ok(await evaluate("document.documentElement.scrollWidth <= innerWidth"));
@@ -197,6 +249,20 @@ try {
     assert.ok(await evaluate("document.querySelector('#question').getBoundingClientRect().bottom < innerHeight"));
     assert.ok(await evaluate("document.querySelector('[aria-label=\"Send question\"]').getBoundingClientRect().bottom <= innerHeight"));
     await shot("mobile-keyboard-sized");
+    await evaluate("document.querySelector('#chat-model').focus()"); await key('Enter');
+    await until(async()=>await evaluate("!!document.querySelector('[role=listbox]')"),'keyboard-sized model menu');
+    assert.ok(await evaluate("(()=>{const m=document.querySelector('.model-menu').getBoundingClientRect(),t=document.querySelector('#chat-model').getBoundingClientRect();return m.top>=0 && m.bottom<=t.top && m.right<=innerWidth})()"));
+    await shot('mobile-keyboard-model-menu'); await key('Escape');
+    await evaluate("document.querySelector('#question').focus()");
+    const initialHeight=await evaluate("document.querySelector('#question').clientHeight");
+    await evaluate(`(()=>{const i=document.querySelector('#question');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,${JSON.stringify('A long draft\n'.repeat(45))});i.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    assert.ok(await evaluate(`document.querySelector('#question').clientHeight > ${initialHeight} && document.querySelector('#question').clientHeight <= 181`));
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('#question')).resize"),'none');
+    assert.ok(await evaluate("document.querySelector('#question').scrollHeight > document.querySelector('#question').clientHeight && document.querySelector('[aria-label=\"Send question\"]').getBoundingClientRect().bottom <= innerHeight"));
+    const beforeIme=generationCount;
+    await evaluate("document.querySelector('#question').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true}))");
+    assert.equal(generationCount,beforeIme);
+    await evaluate("(()=>{const i=document.querySelector('#question');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,'');i.dispatchEvent(new Event('input',{bubbles:true}));})()");
     await command("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     // Account replacement remounts private state; token renewal keeps current data.
     const renewed = {...session, access_token: token + '-renewed'};
@@ -241,6 +307,28 @@ try {
     await until(async () => await text("Make room for"), "guest card reset");
     await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await delay(300); assert.ok(await evaluate("document.documentElement.scrollWidth <= innerWidth")); await shot("mobile-guest-card");
+    await evaluate("document.querySelector('#chat-model').focus()"); await key('Enter');
+    await until(async()=>await evaluate("!!document.querySelector('[role=listbox]')"),'guest menu opens');
+    assert.equal(await evaluate("document.querySelectorAll('[data-locked=true]').length"),2);
+    const beforeLocked=generationCount;
+    await key('Home'); await key('ArrowDown'); await key('Enter');
+    assert.equal(await evaluate("document.querySelector('#chat-model').value"),models[0]!.id);
+    assert.equal(generationCount,beforeLocked);
+    assert.ok(await evaluate("!!document.querySelector('[role=listbox]')"));
+    assert.ok(await evaluate("(()=>{const m=document.querySelector('.model-menu').getBoundingClientRect(),t=document.querySelector('#chat-model').getBoundingClientRect();return m.bottom<=t.top && m.left>=0 && m.right<=innerWidth})()"));
+    await shot('guest-model-padlocks'); await key('Escape');
+    assert.equal(await evaluate("document.activeElement.id"),'chat-model');
+    await key('Enter'); await until(async()=>await evaluate("!!document.querySelector('[role=listbox]')"),'guest menu for sign in');
+    await key('End'); await key('Enter'); await until(async()=>await text('Continue with Google'),'menu sign-in action');
+    assert.equal(generationCount,beforeLocked);
+    await command('Page.navigate',{url:`${server.url}dashboard`}); await until(async()=>await text('Make room for'),'return to guest');
+    unavailableModel=models[2]!.id; await command('Page.reload');
+    await until(async()=>await evaluate("document.querySelector('#chat-model')?.disabled === false"),'guest catalogue with unavailable model');
+    await evaluate("document.querySelector('#chat-model').focus()"); await key('Enter');
+    await until(async()=>await evaluate("!!document.querySelector('[data-unavailable=true]')"),'unavailable model distinct from auth lock');
+    assert.ok(await text('Temporarily unavailable from the provider')); await shot('guest-model-unavailable'); await key('Escape');
+    unavailableModel='';
+
     assert.ok(await evaluate("document.querySelector('.dismiss-invitation').getBoundingClientRect().top >= document.querySelector('.guest-invitation').getBoundingClientRect().top"));
     await command('Emulation.setDeviceMetricsOverride',{width:320,height:568,deviceScaleFactor:1,mobile:true});
     await evaluate("document.querySelector('#question').focus()"); await delay(150);
@@ -279,5 +367,5 @@ try {
   }
   await command("Page.removeScriptToEvaluateOnNewDocument", { identifier: injection.identifier });
 } finally {
-  socket?.close(); chrome.kill(); await chrome.exited; server.stop(true); await rm(profile, { recursive: true, force: true });
+  socket?.close(); chrome.kill(); await chrome.exited; server.stop(); await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

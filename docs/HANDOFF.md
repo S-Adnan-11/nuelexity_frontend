@@ -28,9 +28,15 @@ The composer already supports the backend-approved model catalogue, per-thread c
 ## Quick verification
 
 ```bash
-bun install --frozen-lockfile
-bun run check
-bun run dev
+npm ci
+npm run check
+npm run dev
 ```
 
 Use fake SSE responses for UI iteration; each live search uses limited shared quota. Preserve the Stop action, explicit completion/error behavior, and public env whitelist. Backend setup and remaining account configuration are documented in its README and `docs/DATABASE.md`.
+
+## Chat refinement update — 2026-10-15
+
+See [chat refinement implementation and verification](CHAT_REFINEMENTS.md). The main pane owns conversation scrolling; a shared width-constrained column aligns answers and the compact composer. The model menu now uses the existing Radix Select primitive, including guest padlocks, keyboard discovery, a sign-in action and distinct unavailability copy. Visible labels omit the provider suffix while retaining provenance in API/storage.
+
+`follow_ups` still carries `{questions: string[]}`, now zero to three contextual optional questions from the existing completion. Invalid optional payloads become empty arrays. The UI applies questions only to the matching completed answer, and the existing stored array supports reopening. There is no migration or extra model call. Backend `app.ts`, `lib/follow-ups.ts`, `lib/providers.ts` and `prompts.ts` must ship together for generation. Frontend/old-backend operation remains safe: old generic templates are omitted from display, without rewriting history.

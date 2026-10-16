@@ -1,5 +1,6 @@
 import type { SearchEvent } from "./types";
 import { isModelAttribution } from "./models";
+import { safeFollowUps } from "./follow-ups";
 
 const names = new Set(["meta", "status", "sources", "delta", "follow_ups", "done", "error"]);
 export async function* readSearchEvents(
@@ -28,7 +29,15 @@ export async function* readSearchEvents(
           .map((l) => l.slice(5).trimStart())
           .join("\n");
         if (!name || !text || !names.has(name)) continue;
-        const data: unknown = JSON.parse(text);
+        let data: unknown;
+        try { data = JSON.parse(text); } catch (error) {
+          if (name === "follow_ups") { yield { event: "follow_ups", data: { questions: [] } }; continue; }
+          throw error;
+        }
+        if (name === "follow_ups") {
+          yield { event: "follow_ups", data: { questions: safeFollowUps((data as { questions?: unknown } | null)?.questions) } };
+          continue;
+        }
         if (!data || typeof data !== "object")
           throw new Error("The server returned an invalid event.");
         const fields = data as Record<string, unknown>;
@@ -51,12 +60,6 @@ export async function* readSearchEvents(
             ))
         )
           throw new Error("Invalid sources event.");
-        if (
-          name === "follow_ups" &&
-          (!Array.isArray(fields.questions) ||
-            !fields.questions.every((q) => typeof q === "string"))
-        )
-          throw new Error("Invalid follow-up event.");
         if (
           name === "meta" &&
           (typeof fields.requestId !== "string" ||

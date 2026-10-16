@@ -1,4 +1,4 @@
-/* Approved Return Cat v2 tokens; Bun bundles the locally licensed WOFF files. */
+/* Approved Return Cat v2 tokens; Vite bundles the locally licensed WOFF files. */
 @font-face { font-family: "Manrope"; src: url("../public/brand/v2/fonts/Manrope-Variable.woff") format("woff"); font-style: normal; font-weight: 200 800; font-display: swap; }
 @font-face { font-family: "DM Serif Display"; src: url("../public/brand/v2/fonts/DMSerifDisplay-Regular.woff") format("woff"); font-style: normal; font-weight: 400; font-display: swap; }
 :root { --nx-font-ui: "Manrope", system-ui, sans-serif; --nx-font-display: "DM Serif Display", Georgia, serif; --nx-radius-control: 10px; --nx-radius-card: 18px; --nx-duration: 220ms; --nx-ease: cubic-bezier(.2,.8,.2,1); }

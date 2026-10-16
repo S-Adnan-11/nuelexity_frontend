@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, test } from "vitest";
 import { createGuestPassStorage, guestPassStore } from "../src/lib/guest-pass";
 import { getGuestSession, search, verifyGuestChallenge } from "../src/lib/api";
 

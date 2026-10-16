@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import {
@@ -90,6 +90,7 @@ function Workspace() {
   const scrollPositions = useRef(new Map<string, number>());
   const pendingScroll = useRef<number | null>(null);
   const nearBottom = useRef(false);
+  const wasStreaming = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectedRef = useRef<string | null>(null);
   const modelWrites = useRef(Promise.resolve());
@@ -146,6 +147,7 @@ function Workspace() {
     });
   }
   function chooseModel(modelId: string) {
+    if (!token || !catalogue?.canSelect || !catalogue.models.some(model => model.id === modelId && model.available)) return;
     setSelectedModelId(modelId);
     selectedRef.current = modelId;
     setModelSaveError(null);
@@ -229,6 +231,7 @@ function Workspace() {
     historyController.current = null;
     setMessages([]);
     setConversationId(null);
+    pendingScroll.current = null;
     conversationRef.current = null;
     setThreadStatus("idle");
     setThreadError(null);
@@ -270,7 +273,7 @@ function Workspace() {
     conversationRef.current = id;
     setConversationId(id);
     rememberThread(id);
-    if (!same) { setMessages([]); setSelectedModelId(null); }
+    if (!same) { pendingScroll.current = null; setMessages([]); setSelectedModelId(null); }
     try {
       const detail = await getConversation(id, token, controller.signal);
       if (controller.signal.aborted || !mounted.current || historyController.current !== controller) return;
@@ -294,18 +297,42 @@ function Workspace() {
       }
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scroll = scrollRef.current;
     if (!scroll) return;
     if (pendingScroll.current !== null) { scroll.scrollTop = pendingScroll.current; pendingScroll.current = null; }
-    else if (busy && nearBottom.current) scroll.scrollTop = scroll.scrollHeight;
+    else if (nearBottom.current && (busy || wasStreaming.current)) scroll.scrollTop = scroll.scrollHeight;
+    wasStreaming.current = busy;
   }, [messages, busy]);
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    // Native scrollbars consume width on some systems and overlay on others.
+    // Match that actual gutter so the fixed composer shares the reading axis.
+    const sync = () => scroll.closest<HTMLElement>(".research-main")?.style.setProperty(
+      "--conversation-gutter", `${scroll.offsetWidth - scroll.clientWidth}px`);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, []);
+  function resizeComposer() {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "0px";
+    const maximum = Math.max(64, Math.min(180, (window.visualViewport?.height ?? window.innerHeight) * .28));
+    const height = Math.max(40, Math.min(input.scrollHeight, maximum));
+    input.style.height = `${height}px`;
+    input.style.overflowY = input.scrollHeight > height ? "auto" : "hidden";
+  }
+  useLayoutEffect(resizeComposer, [query]);
   useEffect(() => {
     const viewport = window.visualViewport;
     function resize() {
       const height = viewport?.height ?? window.innerHeight;
       document.documentElement.style.setProperty("--workspace-height", `${height}px`);
       document.documentElement.dataset.compactViewport = String(height < 650);
+      resizeComposer();
     }
     resize();
     viewport?.addEventListener("resize", resize);
@@ -328,7 +355,7 @@ function Workspace() {
   }
   async function submit(value = query) {
     const question = value.trim();
-    if (!question || question.length > 1000 || busy || loadingThread || loading) return;
+    if (!question || question.length > 1000 || busy || controllerRef.current || loadingThread || loading) return;
     if (!modelReady) {
       setError("Select an available model and save your choice before sending. If models could not load, refresh them.");
       return;
@@ -343,7 +370,7 @@ function Workspace() {
     setBusy(true);
     setError(null);
     setQuery("");
-    setStage("Preparing your search");
+    setStage("Researching");
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -368,6 +395,7 @@ function Workspace() {
           .map((m) => ({ role: m.role, content: m.content.slice(0, 1000) }))
       : undefined;
     nearBottom.current = true;
+    let requestFollowUps: string[] = [];
     setMessages((previous) => [...previous, userMessage, assistantMessage]);
     const update = (change: Partial<Message> | ((message: Message) => Partial<Message>)) =>
       setMessages((previous) =>
@@ -410,10 +438,10 @@ function Workspace() {
               update((m) => ({ content: m.content + event.data.text }));
               break;
             case "follow_ups":
-              update({ followUps: event.data.questions });
+              requestFollowUps = event.data.questions;
               break;
             case "done":
-              update({ status: "complete", model: event.data.model ?? null, answerKind: event.data.answerKind ?? null });
+              update({ status: "complete", followUps: requestFollowUps, model: event.data.model ?? null, answerKind: event.data.answerKind ?? null });
               break;
           }
         },
@@ -580,6 +608,7 @@ function Workspace() {
             if (scroll) nearBottom.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 100;
             saveScroll();
           }}>
+          <div className="reading-column">
           {!messages.length && threadStatus === "idle" && (
             <section className="welcome">
               <p className="eyebrow">FOR THE CURIOUS MINDS</p>
@@ -655,7 +684,7 @@ function Workspace() {
                           {copied === message.id ? <Check size={16} /> : <Copy size={16} />}
                         </button>
                       )}
-                      {!!message.followUps.length && (
+                      {message.status === "complete" && !!message.followUps.length && (
                         <div className="follow-ups">
                           <p>Keep exploring</p>
                           {message.followUps.map((question) => (
@@ -682,7 +711,8 @@ function Workspace() {
             </div>
           )}
           </div>
-          <div className="composer-dock">
+          </div>
+          <div className="composer-dock"><div className="reading-column">
           <form className="composer" onSubmit={onSubmit}>
             <label htmlFor="question" className="sr-only">
               {messages.length ? "Ask a follow-up question" : "Ask anything"}
@@ -694,7 +724,7 @@ function Workspace() {
               onChange={(event) => setQuery(event.target.value)}
               placeholder={messages.length ? "Ask a follow-up…" : "Ask anything…"}
               maxLength={1000}
-              rows={2}
+              rows={1}
               disabled={loadingThread}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -703,6 +733,8 @@ function Workspace() {
                 }
               }}
             />
+            <div className="composer-toolbar">
+              <span className="search-indicator" title="Search the web with numbered sources"><Globe size={15} /> Web <span className="source-indicator">· Sources</span></span>
             <ModelSelector catalogue={catalogue} selectedId={effectiveModelId} signedIn={!!token}
               loading={modelsLoading} saving={modelSaving} error={modelsError || modelSaveError}
               disabled={loading || loadingThread}
@@ -711,10 +743,6 @@ function Workspace() {
                 if (modelSaveError && conversationId && effectiveModelId) persistModel(conversationId, effectiveModelId);
                 else void refreshModels();
               }} />
-            <div className="composer-toolbar">
-              <span>
-                <Globe size={15} /> Web <span className="composer-divider" /> Sources included
-              </span>
               {busy ? (
                 <button
                   type="button"
@@ -778,9 +806,9 @@ function Workspace() {
                 : "Your research is saved to your account."}{" "}
             {!token && <Link to="/auth">Sign in</Link>}
           </p>
-          </div>
+          </div></div>
           {!messages.length && threadStatus === "idle" && (
-            <div className="suggestion-list">
+            <div className="suggestion-list reading-column">
               {suggestions.map((question) => (
                 <button
                   disabled={
