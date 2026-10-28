@@ -46,3 +46,12 @@ docs/RETURN_CAT_IMPLEMENTATION.md
 # npm lock is canonical; optional Bun installs must not add a second lock.
 bun.lock
 bun.lockb
+
+# Static hosting artifacts and local publication-review records.
+pages-dist/
+pages-review/
+.wrangler/
+docs/FRONTEND_POLISH_REVIEW.md
+docs/MILESTONE_VERIFICATION.md
+docs/RENDER_LOCAL_VERIFICATION.md
+docs/PREDEPLOYMENT.md

@@ -14,10 +14,18 @@
     "start": "node src/server.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:browser": "tsx scripts/check-model-ui.ts && tsx scripts/check-research-ui.ts && npm run test:startup",
+    "test:browser": "tsx scripts/check-model-ui.ts && tsx scripts/check-research-ui.ts && tsx scripts/check-milestone-ui.ts && tsx scripts/check-production-pages.ts && npm run test:startup-ui && npm run test:startup",
     "check": "npm run typecheck && npm test && npm run build",
     "env:init": "node scripts/init-env.mjs",
-    "test:startup": "node scripts/check-brand-serving.mjs"
+    "release:check": "node scripts/release-check.mjs",
+    "preview:local": "node src/server.mjs --local-preview",
+    "test:startup": "node scripts/check-brand-serving.mjs",
+    "test:startup-ui": "tsx scripts/check-startup-ui.ts",
+    "test:about": "tsx scripts/check-about-ui.ts",
+    "build:pages": "node scripts/pages-build.mjs",
+    "pages:prepare": "node scripts/pages-build.mjs --review",
+    "test:pages": "tsx scripts/check-pages-ui.ts",
+    "audit:release": "node scripts/audit-release.mjs"
   },
   "dependencies": {
     "@radix-ui/react-label": "2.1.15",

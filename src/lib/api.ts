@@ -4,6 +4,12 @@ import type { Conversation, Message, ModelCatalogue, SearchEvent } from "./types
 import { isModelAttribution } from "./models";
 import { guestPassStore } from "./guest-pass";
 import { safeFollowUps } from "./follow-ups";
+import { BackendStartup, withAbort } from "./startup";
+
+const raw = (path: string, options: RequestInit = {}) => fetch(`${BACKEND_URL}${path}`, {
+  ...options, signal: options.signal || AbortSignal.timeout(15000),
+});
+export const backendStartup = new BackendStartup((path, signal) => raw(path, { signal }));
 
 export class ApiError extends Error {
   constructor(
@@ -16,15 +22,23 @@ export class ApiError extends Error {
   }
 }
 async function request(path: string, token: string | undefined, options: RequestInit = {}) {
-  const response = await fetch(`${BACKEND_URL}${path}`, {
+  const settings = {
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
-    signal: options.signal || AbortSignal.timeout(15000),
-  });
+  };
+  let early: Response | undefined;
+  if (!options.method || options.method === "GET") {
+    await withAbort(backendStartup.ensure(async signal => {
+      early = await raw(path, { ...settings, signal });
+      return early;
+    }), options.signal ?? undefined);
+  }
+  options.signal?.throwIfAborted();
+  const response = early || await raw(path, settings);
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { message?: string; code?: string };
@@ -55,8 +69,8 @@ export async function getConversation(
   const detail = await response.json() as { conversation: Conversation; messages: Message[] };
   return { ...detail, messages: detail.messages.map(message => ({ ...message, followUps: safeFollowUps(message.followUps) })) };
 }
-export async function deleteConversation(id: string, token: string) {
-  await request(`/conversations/${encodeURIComponent(id)}`, token, { method: "DELETE" });
+export async function deleteConversation(id: string, token: string, signal?: AbortSignal) {
+  await request(`/conversations/${encodeURIComponent(id)}`, token, { method: "DELETE", signal });
 }
 export async function getModels(token?: string, signal?: AbortSignal): Promise<ModelCatalogue> {
   const response = await request("/models", token, { signal });
@@ -127,7 +141,7 @@ export async function search(
   const response = await request("/nuelexity_ask", token, {
     method: "POST",
     body: JSON.stringify(input),
-    signal,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(75000)]),
     headers: token ? {} : guestHeaders(),
   });
   if (!response.body || !response.headers.get("Content-Type")?.includes("text/event-stream"))

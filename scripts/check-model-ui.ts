@@ -20,6 +20,7 @@ const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.str
 const user = { id: owner, aud: "authenticated", role: "authenticated", email: "browser@example.test", user_metadata: {}, app_metadata: { provider: "google" }, created_at: "now" };
 const server = await serveFixture(async (req): Promise<Response> => {
   const url = new URL(req.url), signed = !!req.headers.get("Authorization");
+  if (url.pathname === "/ready") return Response.json({ status: "ready" });
   if (url.pathname === "/config.json") return Response.json({ BUN_PUBLIC_BACKEND_URL: server.url.origin,
     BUN_PUBLIC_SUPABASE_URL: `${server.url.origin}/supabase`, BUN_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "browser-fixture-key", BUN_PUBLIC_TURNSTILE_SITE_KEY: "" });
   if (url.pathname.startsWith("/supabase/auth/v1/")) {
@@ -108,11 +109,13 @@ async function choose(index: number) {
   await until(async () => await evaluate("!document.body.innerText.includes('Saving model choice')"), "choice saved");
 }
 async function submit(query: string) {
+  const before = requests.length;
   await evaluate(`(() => { const input = document.querySelector('#question'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(query)}); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); })()`);
   await until(async () => await evaluate("document.querySelector('[aria-label=\"Send question\"]')?.disabled === false"), "send enabled");
   await key("Enter");
+  await until(async () => requests.length === before + 1, "one accepted fixture submission");
 }
-async function idle() { await until(async () => await evaluate("!document.querySelector('[aria-label=\"Stop search\"]')"), "answer finished"); }
+async function idle() { await until(async () => await evaluate("!document.querySelector('[aria-label=\"Stop search\"]') && !document.querySelector('[aria-label=\"Cancel waiting question\"]')"), "answer finished"); }
 try {
   let port = "";
   await until(async () => { try { port = (await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).split("\n")[0]!; return !!port; } catch { return false; } }, "Chrome startup");
@@ -185,6 +188,7 @@ try {
   await choose(0);
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)} && !document.body.innerText.includes('Saving model choice')`), "explicit recovery from retired selection");
   await choose(2); await submit("permission"); await idle();
+  await until(async () => await evaluate("document.querySelector('#chat-model')?.disabled === false && document.body.innerText.includes('Your selected model is unavailable')"), "catalogue refreshed after permission failure");
   await evaluate("document.querySelector('#chat-model').focus()");
   await key("Enter");
   await until(async () => await evaluate("document.querySelectorAll('[role=option]')[2]?.getAttribute('aria-disabled') === 'true'"), "permission recovery");
@@ -205,7 +209,10 @@ try {
   assert.notEqual(await evaluate("document.activeElement.id"), "chat-model");
   const screenshot = await command("Page.captureScreenshot", { format: "png" });
   await writeFile(path.join(tmpdir(), "nuelexity-model-selector-mobile.png"), Buffer.from(screenshot.data, "base64"));
-  await evaluate("sessionStorage.setItem('fixture-signed-out','1'); document.querySelector('[aria-label=\"Sign out\"]').click()");
+  await evaluate("sessionStorage.setItem('fixture-signed-out','1'); document.querySelector('[aria-label=\"Open your account\"]').click()");
+  await until(async () => await evaluate("!!document.querySelector('.account-actions button')"), "account page");
+  await evaluate("document.querySelector('.account-actions button').click()");
+  await until(async () => await evaluate("!!document.querySelector('#question')"), "guest workspace after sign-out");
   await until(async () => await evaluate("document.querySelector('#chat-model')?.dataset.canSelect === 'false' && document.querySelector('#chat-model')?.disabled === false"), "sign-out returns guest behavior");
   await until(async () => await evaluate(`document.querySelector('#chat-model')?.value === ${JSON.stringify(models[0]!.id)}`), "guest catalogue loaded");
   assert.equal(await evaluate("document.querySelector('#chat-model').value"), models[0]!.id);
@@ -215,6 +222,11 @@ try {
   await command("Page.removeScriptToEvaluateOnNewDocument", { identifier: injected.identifier });
   console.log("PASS production browser: desktop/mobile, keyboard selection and Tab, persistence across refresh/reopening, frozen generation, legacy attribution, failed-save/retired-model/permission/interruption/quota recovery, sign-out/default behavior. All auth/provider calls mocked.");
   console.log(`Mock generation submissions: ${requests.length}; mobile screenshot: /tmp/nuelexity-model-selector-mobile.png`);
+} catch (error) {
+  // Fixture-only state, never a real account/provider response.
+  console.error("Model fixture failure state:", JSON.stringify({ selected, unavailable, requests,
+    ui: await evaluate("({ model: document.querySelector('#chat-model')?.value, query: document.querySelector('#question')?.value, modelStatus: document.querySelector('#model-status')?.textContent, errors: Array.from(document.querySelectorAll('.error-notice')).map(n=>n.textContent), busy: !!document.querySelector('[aria-label=\"Stop search\"]'), waiting: !!document.querySelector('[aria-label=\"Cancel waiting question\"]') })").catch(() => null) }));
+  throw error;
 } finally {
   socket?.close(); chrome.kill(); await chrome.exited; server.stop();
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

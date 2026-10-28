@@ -41,7 +41,7 @@ export function ModelSelector({ catalogue, selectedId, signedIn, loading, saving
               const locked = !canChoose && model.id !== catalogue.defaultModelId;
               const restricted = locked || !model.available || catalogue.answerMode !== "ai";
               const description = !model.available ? (model.unavailableReason || "Currently unavailable") :
-                locked ? "Sign in required" : !canChoose ? "Current guest default" : "";
+                locked ? "Sign in required" : !canChoose ? "Default" : "";
               return <Select.Item key={model.id} value={model.id} className="model-option"
                 aria-disabled={restricted} aria-label={`${model.name}${model.preview ? ', Preview' : ''}${description ? ', ' + description : ''}`}
                 data-locked={locked || undefined} data-unavailable={!model.available || undefined}
@@ -57,7 +57,7 @@ export function ModelSelector({ catalogue, selectedId, signedIn, loading, saving
             })}
           </Select.Group>
           {!canChoose && <><Select.Separator className="model-menu-divider" />
-            <Select.Item value="sign-in" className="model-option model-sign-in"><Select.ItemText>Sign in to choose a model</Select.ItemText></Select.Item>
+            <Select.Item value="sign-in" className="model-option model-sign-in"><Select.ItemText>Sign in to access more models</Select.ItemText></Select.Item>
           </>}
         </Select.Viewport>
         <Select.ScrollDownButton className="menu-scroll">↓</Select.ScrollDownButton>

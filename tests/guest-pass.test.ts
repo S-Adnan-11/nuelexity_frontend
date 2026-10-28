@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "vitest";
 import { createGuestPassStorage, guestPassStore } from "../src/lib/guest-pass";
-import { getGuestSession, search, verifyGuestChallenge } from "../src/lib/api";
+import { backendStartup, getGuestSession, search, verifyGuestChallenge } from "../src/lib/api";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
+  backendStartup.reset();
   globalThis.fetch = originalFetch;
   guestPassStore.clear();
 });
@@ -37,6 +38,7 @@ test("blocked browser storage retains clearance in memory for the current page",
 test("expired or rejected server clearance is discarded on refresh", async () => {
   guestPassStore.save("v1.old.signature");
   globalThis.fetch = (async (_input, options) => {
+    if (String(_input).endsWith("/ready")) return Response.json({ status: "ready" });
     expect(new Headers(options?.headers).get("X-Guest-Pass")).toBe("v1.old.signature");
     return Response.json({ verified: false, verificationRequired: true, expiresAt: null });
   }) as typeof fetch;

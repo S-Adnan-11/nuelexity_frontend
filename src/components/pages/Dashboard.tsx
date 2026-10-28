@@ -8,7 +8,6 @@ import {
   Check,
   Copy,
   Globe,
-  LogOut,
   Menu,
   Plus,
   Search,
@@ -23,16 +22,21 @@ import {
   getModels,
   search,
   setConversationModel,
+  backendStartup,
 } from "@/lib/api";
+import { useBackendStartup } from "@/lib/useBackendStartup";
 import { TURNSTILE_SITE_KEY } from "@/lib/config";
 import { useGuestSession } from "@/lib/useGuestSession";
 import { useConversationLibrary } from "@/lib/useConversationLibrary";
 import { validThreadId, threadPath } from "@/lib/thread-navigation";
-import { supabase } from "@/lib/supabase/client";
+import { accountProfile } from "../../lib/profile";
+import { Avatar } from "../Avatar";
+import { Footer } from "../Footer";
 import type { Message, ModelCatalogue } from "@/lib/types";
 import { answerModelLabel } from "@/lib/models";
 import { useAuth } from "../AuthProvider";
-import { Answer, safeSourceUrl } from "../Answer";
+import { Answer } from "../Answer";
+import { SourceCards } from "../SourceCards";
 import { Turnstile } from "../Turnstile";
 import { ModelSelector } from "../ModelSelector";
 import { BrandLogo, BrandMark, ThreadSkeleton, WorkspaceSkeleton } from "../Brand";
@@ -44,7 +48,7 @@ const suggestions = [
   "Help me understand quantum computing",
 ];
 export default function Dashboard() {
-  const { session, loading } = useAuth();
+  const { session, loading, signingOut } = useAuth();
   const navigate = useNavigate();
   const previousIdentity = useRef<string | null | undefined>(undefined);
   useLayoutEffect(() => {
@@ -54,7 +58,7 @@ export default function Dashboard() {
       navigate("/dashboard", { replace: true });
     previousIdentity.current = identity;
   }, [session?.user.id, loading, navigate]);
-  if (loading) return <WorkspaceSkeleton />;
+  if (loading || signingOut) return <WorkspaceSkeleton />;
   // A new identity gets a fresh workspace. Token renewal keeps the same one.
   return <Workspace key={session?.user.id ?? "guest"} />;
 }
@@ -66,6 +70,7 @@ function Workspace() {
   const { conversationId: routeThreadId } = useParams();
   const token = session?.access_token,
     userId = session?.user.id;
+  const startup = useBackendStartup();
   const library = useConversationLibrary(token);
   const { conversations, status: historyStatus, error: historyError, refresh: refreshHistory } = library;
   const initialRoute = useRef(true);
@@ -75,6 +80,8 @@ function Workspace() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false),
     [loadingThread, setLoadingThread] = useState(false);
+  const [waitingQuestion, setWaitingQuestion] = useState<string | null>(null);
+  const pendingQuestion = useRef<string | null>(null);
   const [stage, setStage] = useState(""),
     [error, setError] = useState<string | null>(null);
   const [threadStatus, setThreadStatus] = useState<"idle" | "loading" | "refreshing" | "ready" | "failed">("idle");
@@ -106,6 +113,7 @@ function Workspace() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectedRef = useRef<string | null>(null);
   const modelWrites = useRef(Promise.resolve());
+  const mutations = useRef(new AbortController());
   const modelEpoch = useRef(0);
   const modelRevision = useRef(0);
   const activeKey = userId ? `nuelexity:active-thread:${userId}` : null;
@@ -113,6 +121,7 @@ function Workspace() {
   selectedRef.current = effectiveModelId;
   const modelReady = threadStatus !== "failed" && !!catalogue && !modelsLoading && !modelsError && !modelSaving && !modelSaveError &&
     (catalogue.answerMode === "sources-only" || !!catalogue.models.find((model) => model.id === effectiveModelId && model.available));
+  const modelBlocked = startup === "ready" && !modelsLoading && !modelReady;
 
   const refreshModels = useCallback(async (signal?: AbortSignal) => {
     modelsController.current?.abort();
@@ -150,7 +159,7 @@ function Workspace() {
     // Serialize quick changes: an older network response cannot become the saved choice.
     modelWrites.current = modelWrites.current.catch(() => {}).then(async () => {
       if (epoch !== modelEpoch.current) return;
-      await setConversationModel(id, modelId, token);
+      await setConversationModel(id, modelId, token, mutations.current.signal);
     }).catch((failure) => {
       if (epoch === modelEpoch.current && revision === modelRevision.current)
         setModelSaveError(`Your choice was not saved. Choose a model again to retry. ${(failure as Error).message}`);
@@ -168,6 +177,7 @@ function Workspace() {
 
   useLayoutEffect(() => {
     mounted.current = true;
+    if (mutations.current.signal.aborted) mutations.current = new AbortController();
     const changed = routeKey.current !== location.key;
     routeKey.current = location.key;
     if (initialRoute.current) {
@@ -191,15 +201,18 @@ function Workspace() {
       return;
     }
     // The meta event attaches a URL to the answer already streaming in this workspace.
-    if (conversationRef.current === routeThreadId && controllerRef.current) return;
+    if (conversationRef.current === routeThreadId && controllerRef.current &&
+        (pendingQuestion.current === null || !changed)) return;
     void openThread(routeThreadId);
   }, [location.key, token]);
   useEffect(
     () => () => {
       mounted.current = false;
+      mutations.current.abort();
       modelEpoch.current++;
       controllerRef.current?.abort();
       controllerRef.current = null;
+      pendingQuestion.current = null;
       modelsController.current?.abort();
       historyController.current?.abort();
     },
@@ -234,6 +247,8 @@ function Workspace() {
     saveScroll();
     controllerRef.current?.abort();
     controllerRef.current = null;
+    pendingQuestion.current = null;
+    setWaitingQuestion(null);
     historyController.current?.abort();
     historyController.current = null;
     setMessages([]);
@@ -273,6 +288,8 @@ function Workspace() {
     saveScroll();
     controllerRef.current?.abort();
     controllerRef.current = null;
+    pendingQuestion.current = null;
+    setWaitingQuestion(null);
     setBusy(false);
     setStage("");
     historyController.current?.abort();
@@ -361,30 +378,57 @@ function Workspace() {
   async function removeThread(id: string) {
     if (!token || busy || !window.confirm("Delete this conversation and its messages?")) return;
     try {
-      await deleteConversation(id, token);
+      await deleteConversation(id, token, mutations.current.signal);
       if (!mounted.current) return;
       if (conversationRef.current === id) newSearch();
       await refreshHistory();
     } catch (error) {
+      if (!mounted.current) return;
       setError((error as Error).message);
     }
   }
-  async function submit(value = query) {
+  function submit(value = query) {
     const question = value.trim();
     if (!question || question.length > 1000 || busy || controllerRef.current || loadingThread || loading) return;
-    if (!modelReady) {
-      setError("Select an available model and save your choice before sending. If models could not load, refresh them.");
-      return;
-    }
-    if (!token && (!guest.ready || guest.checking || guest.verifying)) {
-      setError("Complete the verification before searching.");
+    if (threadStatus === "failed" || modelSaving || modelSaveError || modelBlocked) {
+      setError("Open a conversation and save your model choice before sending.");
       return;
     }
     const controller = new AbortController();
-    const requestModelId = effectiveModelId; // Frozen for this request, even if the selector changes.
     controllerRef.current = controller;
+    pendingQuestion.current = question;
+    setQuery(question);
+    setWaitingQuestion(question);
     setBusy(true);
     setError(null);
+  }
+  function stopSearch() {
+    controllerRef.current?.abort();
+    if (pendingQuestion.current !== null) {
+      controllerRef.current = null;
+      pendingQuestion.current = null;
+      setWaitingQuestion(null);
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (!waitingQuestion || pendingQuestion.current === null) return;
+    if (["configuration", "unavailable", "unreachable"].includes(startup) || modelBlocked) {
+      stopSearch();
+      setError(startup === "configuration" ? "The service needs configuration from its owner. Your question has been kept."
+        : startup === "unreachable" ? "The service could not be reached. It may be starting, suspended or offline. Your question has been kept."
+        : "The service could not become ready for search. Your question has been kept. Try again later.");
+      return;
+    }
+    if (startup !== "ready" || !modelReady || (!token && (!guest.ready || guest.checking || guest.verifying))) return;
+    const question = pendingQuestion.current, controller = controllerRef.current;
+    pendingQuestion.current = null; // Synchronous fence before any asynchronous search work.
+    setWaitingQuestion(null);
+    if (controller && !controller.signal.aborted) void runSearch(question, controller);
+  }, [waitingQuestion, startup, modelReady, modelBlocked, modelsError, token, guest.ready, guest.checking, guest.verifying]);
+
+  async function runSearch(question: string, controller: AbortController) {
+    const requestModelId = effectiveModelId;
     setQuery("");
     setStage("Researching");
     const userMessage: Message = {
@@ -494,15 +538,6 @@ function Workspace() {
     event.preventDefault();
     void submit();
   }
-  async function signOut() {
-    controllerRef.current?.abort();
-    const result = await supabase?.auth.signOut();
-    if (result?.error) {
-      setError("Sign-out failed. Please try again.");
-      return;
-    }
-    navigate("/dashboard");
-  }
   async function copy(message: Message) {
     try {
       await navigator.clipboard.writeText(message.content);
@@ -514,10 +549,13 @@ function Workspace() {
 
   return (
     <div className="research-app">
+      <a className="skip-link" href="#workspace-main">Skip to research</a>
       <button
         className="mobile-menu icon-button"
         onClick={() => setMobileOpen(true)}
         aria-label="Open navigation"
+        aria-expanded={mobileOpen}
+        aria-controls="workspace-navigation"
       >
         <Menu size={21} />
       </button>
@@ -528,7 +566,7 @@ function Workspace() {
           onClick={() => setMobileOpen(false)}
         />
       )}
-      <aside ref={sidebarRef} inert={narrow && !mobileOpen} className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
+      <aside id="workspace-navigation" ref={sidebarRef} inert={narrow && !mobileOpen} className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
         <Link className="brand" to="/dashboard">
           <BrandLogo />
         </Link>
@@ -543,7 +581,7 @@ function Workspace() {
           <Plus size={18} /> New search <kbd>↗</kbd>
         </button>
         <div className="sidebar-heading">
-          <BookOpen size={15} /> Your library
+          <BookOpen size={15} /> Your Research library
         </div>
         <nav aria-label="Saved conversations" className="thread-list">
           {historyError && (
@@ -598,33 +636,20 @@ function Workspace() {
           </div>}
         </nav>
         <div className="sidebar-footer">
-          <span className="small-orbit" aria-hidden="true">
-            <BrandMark />
-          </span>
-          {session ? (
-            <>
-              <span className="account-label">
-                {session.user.user_metadata.full_name || session.user.email || "Your account"}
-              </span>
-              <button className="icon-button" aria-label="Sign out" onClick={() => void signOut()}>
-                <LogOut size={17} />
-              </button>
-            </>
-          ) : (
-            <Link to="/auth">
-              Sign in <ArrowUpRight size={16} />
-            </Link>
-          )}
+          {session ? <Link className="sidebar-account" to="/account" aria-label="Open your account">
+            <Avatar user={session.user} /><span className="account-label">{accountProfile(session.user).name || "Your account"}</span><ArrowUpRight size={16} />
+          </Link> : <><BrandMark /><Link to="/auth">Sign in <ArrowUpRight size={16} /></Link></>}
+
         </div>
       </aside>
 
-      <main className="research-main">
+      <main id="workspace-main" tabIndex={-1} className="research-main" inert={narrow && mobileOpen}>
         <header className="topbar">
           <Link className="mobile-brand" to="/dashboard"><BrandMark decorative={false} size={28} /></Link>
           <span>
             <Globe size={14} /> Search the web
           </span>
-          <span className="plan-label">{session ? "Personal workspace" : "Guest workspace"}</span>
+          {session ? <Link className="plan-label workspace-account" to="/account" aria-label="Open your account"><Avatar user={session.user} size={26} /><span>Personal workspace</span></Link> : <span className="plan-label">Guest workspace</span>}
         </header>
         <div className={`research-content ${(messages.length || threadStatus !== "idle") ? "has-messages" : ""}`}>
           <div className="conversation-scroll" ref={scrollRef} onScroll={() => {
@@ -672,30 +697,7 @@ function Workspace() {
                         )}
                       </div>
                       {answerModelLabel(message) && <p className="answer-model">{answerModelLabel(message)}</p>}
-                      {!!message.sources.length && (
-                        <div className="source-grid" aria-label="Sources">
-                          {message.sources.map((source) => {
-                            const url = safeSourceUrl(source.url);
-                            if (!url) return null;
-                            return (
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="source-card"
-                                key={source.id}
-                              >
-                                <span className="source-domain">
-                                  <span>{source.id}</span>
-                                  {new URL(url).hostname.replace(/^www\./, "")}
-                                </span>
-                                <strong>{source.title}</strong>
-                                <ArrowUpRight size={13} />
-                              </a>
-                            );
-                          })}
-                        </div>
-                      )}
+                      {!!message.sources.length && <SourceCards sources={message.sources} />}
                       <Answer content={message.content} sources={message.sources} />
                       {message.status === "streaming" && (
                         <p className="stream-status" role="status">
@@ -754,6 +756,7 @@ function Workspace() {
               maxLength={1000}
               rows={1}
               disabled={loadingThread}
+              readOnly={waitingQuestion !== null}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
@@ -775,8 +778,8 @@ function Workspace() {
                 <button
                   type="button"
                   className="send-button"
-                  onClick={() => controllerRef.current?.abort()}
-                  aria-label="Stop search"
+                  onClick={stopSearch}
+                  aria-label={waitingQuestion ? "Cancel waiting question" : "Stop search"}
                 >
                   <Square size={15} />
                 </button>
@@ -787,8 +790,7 @@ function Workspace() {
                     !query.trim() ||
                     loading ||
                     loadingThread ||
-                    !modelReady ||
-                    (!token && (!guest.ready || guest.checking || guest.verifying))
+                    threadStatus === "failed" || modelSaving || !!modelSaveError || modelBlocked
                   }
                   aria-label="Send question"
                 >
@@ -797,6 +799,18 @@ function Workspace() {
               )}
             </div>
           </form>
+          {startup !== "ready" && startup !== "starting" && <p role="status" className="quota-note">
+            {startup === "configuration" ? "The service needs configuration from its owner."
+              : startup === "unavailable" ? "Our service is running but not ready for research. Try again later."
+              : "Our service is currently unreachable. It may be starting, suspended or offline."}
+            <button type="button" className="text-button" onClick={() => {
+              backendStartup.reset();
+              void refreshModels();
+              if (!token) guest.recheck();
+              else void refreshHistory();
+            }}>Retry</button>
+          </p>}
+          {waitingQuestion && <p role="status" className="quota-note">Awaiting {startup !== "ready" ? "our service" : !modelReady ? "model availability" : "verification"}. Cancel to edit it.</p>}
           {!token &&
             !loading &&
             !guest.ready &&
@@ -805,11 +819,7 @@ function Workspace() {
             TURNSTILE_SITE_KEY && (
               <Turnstile onToken={guest.verify} onError={guest.onError} resetKey={guest.resetKey} />
             )}
-          {!token && !loading && (guest.checking || guest.verifying) && (
-            <p role="status" className="quota-note">
-              Checking guest verification…
-            </p>
-          )}
+          {!token && !loading && (guest.checking || guest.verifying) && <p role="status" className="sr-only">Checking guest verification…</p>}
           {!token && guest.error && (
             <p role="alert" className="error-notice">
               {guest.error}{" "}
@@ -826,14 +836,12 @@ function Workspace() {
             !TURNSTILE_SITE_KEY && (
               <p className="error-notice">Guest search is unavailable. Please sign in.</p>
             )}
-          <p className="quota-note">
+          {(remaining !== null || !token) && <p className="quota-note">
             {remaining !== null
               ? `${remaining} searches left in your daily allowance.`
-              : !token
-                ? "Try it as a guest. Sign in to save your research."
-                : "Your research is saved to your account."}{" "}
-            {!token && <Link to="/auth">Sign in</Link>}
-          </p>
+              : "Guest research is temporary."}{" "}
+            {!token && <Link to="/auth">Sign in to save research</Link>}
+          </p>}
           </div></div>
           {!messages.length && threadStatus === "idle" && (
             <div className="suggestion-list reading-column">
@@ -842,7 +850,7 @@ function Workspace() {
                   disabled={
                     busy ||
                     loading ||
-                    (!token && (!guest.ready || guest.checking || guest.verifying))
+                    loadingThread
                   }
                   key={question}
                   onClick={() => {
@@ -859,9 +867,7 @@ function Workspace() {
           )}
         </div>
         {!session && <GuestInvitation />}
-        <footer className="page-footer">
-          Stay curious. Check the sources.<span>Answers can be imperfect.</span>
-        </footer>
+        <Footer compact />
       </main>
     </div>
   );

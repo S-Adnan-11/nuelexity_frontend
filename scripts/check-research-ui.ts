@@ -44,6 +44,7 @@ const server = await serveFixture(async (req): Promise<Response> => {
   const url = new URL(req.url);
   const signed = !!req.headers.get("Authorization");
   const otherAccount = req.headers.get("Authorization")?.endsWith("other-account");
+  if (url.pathname === "/ready") return Response.json({ status: "ready" });
   if (url.pathname === "/config.json" && configMode === "failed") return Response.json({}, {status:503});
   if (url.pathname === "/config.json") return Response.json({ BUN_PUBLIC_BACKEND_URL: server.url.origin, BUN_PUBLIC_SUPABASE_URL: configMode === "missing-auth" ? "" : `${server.url.origin}/supabase`, BUN_PUBLIC_SUPABASE_PUBLISHABLE_KEY: configMode === "missing-auth" ? "" : "browser-fixture-key", BUN_PUBLIC_TURNSTILE_SITE_KEY: "" });
   if (url.pathname.startsWith("/supabase/auth/v1/")) {
@@ -123,7 +124,11 @@ async function key(key: string) {
   await command('Input.dispatchKeyEvent',{type:'keyUp',key,code:key});
   await delay(60);
 }
-async function open(id: string) { await click(`.thread-row a[href="/dashboard/${id}"]`); }
+async function open(id: string) {
+  const selector = `.thread-row a[href="/dashboard/${id}"]`;
+  await until(() => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`), "library entry available after startup");
+  await click(selector);
+}
 async function submit(question = "Explore the evidence") {
   await evaluate(`(() => { const input = document.querySelector('#question'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(question)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await until(async () => await evaluate(`document.querySelector('[aria-label="Send question"]')?.disabled === false`), "send enabled");
@@ -285,12 +290,12 @@ try {
     detailDelay = 700; await open(second);
     const other = {...session, access_token: token + '.other-account', user: {...user,id:'22222222-2222-4222-8222-222222222222',email:'other@example.test'}};
     await evaluate(`(() => { const oldValue=localStorage.getItem('sb-127-auth-token'); const newValue=${JSON.stringify(JSON.stringify(other))}; localStorage.setItem('sb-127-auth-token',newValue); const channel=new BroadcastChannel('sb-127-auth-token'); channel.postMessage({event:'SIGNED_IN',session:JSON.parse(newValue)}); setTimeout(()=>channel.close(),100); })()`);
-    await until(async () => await text('other@example.test'), 'account replacement'); await delay(850);
+    await until(async () => await evaluate("document.querySelector('.sidebar-account')?.textContent.includes('Your account')"), 'account replacement'); await delay(850);
     assert.equal(await text('Second thread answer'),false); assert.equal(await text('Follow the evidence'),false);
     await evaluate(`(() => { const oldValue=localStorage.getItem('sb-127-auth-token'); const newValue=${JSON.stringify(JSON.stringify(session))}; localStorage.setItem('sb-127-auth-token',newValue); const channel=new BroadcastChannel('sb-127-auth-token'); channel.postMessage({event:'SIGNED_IN',session:JSON.parse(newValue)}); setTimeout(()=>channel.close(),100); })()`);
     await until(async () => await text('First research thread'), 'original account restored');
     // Sign out while a detail fetch is outstanding; its late response must remain private.
-    detailDelay = 700; await open(second); await click('[aria-label="Sign out"]');
+    detailDelay = 700; await open(second); await click('[aria-label="Open your account"]'); await until(async () => await text('Your account.'), 'account page'); await click('.account-actions button'); await until(async () => await evaluate("!!document.querySelector('#question')"), "guest workspace after sign-out");
     await until(async () => await text("Make room for"), "guest invitation after resolved sign-out"); await delay(850);
     assert.equal(await text("Second thread answer"), false); assert.equal(await text("Follow the evidence"), false);
     await shot("guest-home");
@@ -400,7 +405,7 @@ try {
     await until(async () => await evaluate("!!document.querySelector('.library-pagination button:not(:disabled)')"), "library ready before sign-out race");
     listDelay = 650; await click(more);
     // Only the allowed OAuth buttons are present, and both invoke Supabase PKCE.
-    await click('[aria-label="Sign out"]');
+    await click('[aria-label="Open your account"]'); await until(async () => await text('Your account.'), 'account page'); await click('.account-actions button'); await until(async () => await evaluate("!!document.querySelector('#question')"), "guest workspace after sign-out");
     await until(async () => await text("Guest workspace"), "guest reset");
     await delay(800);
     assert.equal(await evaluate("document.querySelectorAll('.thread-row').length"), 0, "late older-page response stays private");
@@ -415,7 +420,7 @@ try {
     await command("Page.navigate", { url: `${server.url}auth/callback` });
     await until(async () => await evaluate(`location.pathname === '/dashboard/${second}'`) && await text('Second thread answer'), "OAuth return resumes the requested private URL");
     assert.equal(await evaluate("sessionStorage.getItem('nuelexity:sign-in-thread')"), null);
-    await click('[aria-label="Sign out"]');
+    await click('[aria-label="Open your account"]'); await until(async () => await text('Your account.'), 'account page'); await click('.account-actions button'); await until(async () => await evaluate("!!document.querySelector('#question')"), "guest workspace after sign-out");
     await until(async () => await text("Guest workspace"), "guest after private URL sign-in");
     await click('.new-search');
     await until(async () => await evaluate("location.pathname === '/dashboard'"), "guest private-URL recovery");

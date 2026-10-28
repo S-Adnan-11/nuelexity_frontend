@@ -50,7 +50,9 @@ npm run build        # Static files in dist/, including config.json
 npm start        # Production Node server, loads public settings at startup
 ```
 
-Static hosting must include `dist/config.json` and rewrite SPA paths (`/dashboard`, `/dashboard/<conversation-id>`, `/auth`, `/auth/callback`) to `index.html`. Configure the backend HTTPS URL before building for deployment. `npm start` serves the built `dist` directory with Node/Express and reads only whitelisted public settings at startup. Build first. Runtime settings override the generated `/config.json` response; static hosts use the build-time `dist/config.json`. No hosting service is selected or provisioned.
+The Node server serves prerendered Home, About and Legal HTML, private noindex route documents, security headers and real 404s. Use `npm run preview:local` for loopback-only review after building. Cloudflare Pages uses `npm run build:pages` and the separate `pages-dist/` static artifact, with generated redirects/headers and the same publication hold. Policy approval, an effective date and the owner’s Google-branding confirmation are required; `npm run release:check` lists blockers. See [Cloudflare Pages setup, manual controls and rollback](docs/CLOUDFLARE_PAGES_RELEASE.md). `npm run pages:prepare` produces a local `pages-review/` fixture for emulator checks and never the configured deployment output. Do not bypass release checks by uploading another build folder.
+
+`site-content.json` supplies optional developer name/GitHub/portfolio, operator/contact/policy dates and optional public Search Console verification. Omitted developer links are not rendered. It is build-time editorial configuration, not an expansion of the four-field public environment whitelist. No external dashboard is changed by editing it.
 
 ## Conversation model selection
 
@@ -92,7 +94,7 @@ npm start
 
 Vite supplies development serving/HMR and production bundling; the matching Tailwind Vite plugin compiles the existing CSS. React, routes, branding, model selection and research UI stay intact. `npm run check` combines typecheck, offline tests and production build. `npm run test:browser` additionally requires an installed Chrome/Chromium; set `CHROME_BIN` to its executable. These browser fixtures use fake auth/provider/history and cost no credits. The backend's `npm run test:browser` can also exercise this build against its real compiled Node HTTP/SSE handlers with fake services.
 
-For a Node deployment, build with dev dependencies, then use `npm prune --omit=dev` and `npm start`. To install directly on a runtime host, copy `dist/`, `src/server.mjs`, `public-env.mjs`, `scripts/load-env.mjs`, `package.json` and `package-lock.json`, run `npm ci --omit=dev`, and supply your own environment. Startup needs no Vite, tsx, TypeScript, test runner or Bun. `npm run test:startup` also works after pruning and checks SPA routes, assets, public settings and graceful shutdown. Reinstall with `npm ci` before developing/building again.
+For a Node deployment, build with dev dependencies, then use `npm prune --omit=dev` and `npm start`. To install directly on a runtime host, copy `dist/`, `src/server.mjs`, `public-env.mjs`, `site-content.json`, `scripts/load-env.mjs`, `scripts/publication.mjs`, `package.json` and `package-lock.json`, run `npm ci --omit=dev`, and supply your own environment. Startup needs no Vite, tsx, TypeScript, test runner or Bun. `npm run test:startup` also works after pruning and checks SPA routes, assets, public settings and graceful shutdown. Reinstall with `npm ci` before developing/building again.
 
 Node loads `.env.local`, `.env.production` for build/start or `.env.development` for dev, then `.env`; explicit process values win. Tests do not load developer files. Configure your own Supabase public URL/key and backend URL; OAuth redirect allowlists, migrations, provider keys and production Turnstile remain external setup, not npm lifecycle work. No hosting is provisioned. Scripts avoid POSIX-only environment assignment and use Node filesystem/process APIs; verification so far is Linux only.
 
@@ -109,3 +111,9 @@ bun run dev
 ```
 
 `package-lock.json` is the only committed lockfile and the reproducible install/CI contract is `npm ci`. Bun imports that lockfile. Its generated `bun.lock` is local/ignored; it is not a second source of truth. Before reinstalling with Bun after npm dependency edits, remove the local Bun lock with `node -e "require('node:fs').rmSync('bun.lock', {force:true})"` so it imports the current npm lock. Do not use `bun test` or run the old TypeScript/Bun server directly. The supported runtime is Node, including when scripts are invoked by Bun. After dependency changes, use `npm install`, commit `package.json` and `package-lock.json` together, and verify `npm ci`; do not commit generated Bun locks.
+
+## Account, About and predeployment review
+
+Signed-in workspace controls open `/account` using the existing session metadata. Sign-out is explicitly scoped to the current Supabase session and clears private workspace state across listening tabs; issued access JWTs can remain valid until expiry. It does not sign out Google/GitHub or delete history. `/about` and `/legal` are public, with compact footer links. Necessary storage is documented without adding optional tracking or a consent banner.
+
+See [release verification](docs/RELEASE_PREPARATION.md), [Cloudflare Pages setup](docs/CLOUDFLARE_PAGES_RELEASE.md) and [complete policy wording/remaining decisions](docs/POLICY_REVIEW.md). The V1 presentation is owner-approved; policy publication remains held. No new SQL is needed and no already-confirmed migration should be repeated.

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { ArrowLeft } from "lucide-react";
-import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "../AuthProvider";
-import { BrandLogo, BrandMark } from "../Brand";
+import { BrandMark } from "../Brand";
+import { Footer } from "../Footer";
 import { OAuthButtons } from "../OAuthButtons";
 import { rememberSignInThread, takeSignInThread, threadPath, validThreadId } from "@/lib/thread-navigation";
 
@@ -20,10 +20,15 @@ export default function Auth() {
     if (session) {
       const stored = takeSignInThread();
       const id = requested && validThreadId(requested) ? requested : callback ? stored : null;
-      navigate(id ? threadPath(id) : "/dashboard", { replace: true });
+      let account = params.get("return") === "account";
+      try { account ||= callback && sessionStorage.getItem("nuelexity:sign-in-account") === "1"; sessionStorage.removeItem("nuelexity:sign-in-account"); } catch {}
+      navigate(id ? threadPath(id) : account ? "/account" : "/dashboard", { replace: true });
       return;
     }
-    if (!callback) rememberSignInThread(requested);
+    if (!callback) {
+      rememberSignInThread(requested);
+      try { if (params.get("return") === "account") sessionStorage.setItem("nuelexity:sign-in-account", "1"); else sessionStorage.removeItem("nuelexity:sign-in-account"); } catch {}
+    }
     if (params.has("error") || hash.has("error")) {
       rememberSignInThread(null);
       setError("Sign-in wasn't completed. Please try again.");
@@ -36,24 +41,17 @@ export default function Auth() {
     return () => clearTimeout(timer);
   }, [callback, session, loading]);
   return (
-    <main className="auth-page">
+    <main id="page-content" tabIndex={-1} className="auth-page">
       <Link to="/dashboard" className="back-link">
         <ArrowLeft size={16} /> Back to search
       </Link>
       <div className="auth-card">
         <BrandMark size={120} />
-        {/* <div className="auth-logo"><BrandLogo /></div> */}
-        <h1>Curiosity killed the cat, <span style={{color:'#57CBB5'}}>nuelexity</span> brought it back!</h1>
+        <h1>Curiosity killed the cat, <span style={{color:'var(--nx-link)'}}>Nuelexity</span> brought it back!</h1>
         <p>Sign in to save your research and access more models.</p>
         {(error || sessionError) && (
           <p role="alert" className="error-notice">
             {error || sessionError}
-          </p>
-        )}
-        {!supabase && (
-          <p className="error-notice">
-            Sign-in setup is incomplete. Add the public Supabase URL and publishable key to the
-            frontend environment.
           </p>
         )}
         {loading || (callback && !error && !sessionError) ? (
@@ -67,9 +65,10 @@ export default function Auth() {
           </>
         )}
         <small>
-          A little curiousity goes a looong wayy..
+          A little curiosity goes a long way.
         </small>
       </div>
+      <Footer />
     </main>
   );
 }
