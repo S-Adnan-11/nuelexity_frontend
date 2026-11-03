@@ -30,10 +30,23 @@ export function RouteEffects() {
     if (!pathname.startsWith("/dashboard") && pathname !== "/") {
       let id = "page-content";
       try { if (hash) id = decodeURIComponent(hash.slice(1)); } catch { /* Malformed anchors do not break navigation. */ }
-      const target = document.getElementById(id);
-      if (target) { target.tabIndex = -1; target.focus({ preventScroll: true });
-        if (hash) target.scrollIntoView();
-        else window.scrollTo(0, 0); }
+      // Initial fragment navigation can otherwise focus a prerendered node that
+      // React replaces. Finish loading before focusing the current DOM target.
+      let frame = 0;
+      const focus = () => {
+        frame = requestAnimationFrame(() => {
+          const target = document.getElementById(id);
+          if (target) {
+            target.tabIndex = -1;
+            target.focus({ preventScroll: true });
+            if (hash) target.scrollIntoView();
+            else window.scrollTo(0, 0);
+          }
+        });
+      };
+      if (document.readyState === "complete") focus();
+      else window.addEventListener("load", focus, { once: true });
+      return () => { window.removeEventListener("load", focus); cancelAnimationFrame(frame); };
     }
   }, [pathname, hash]);
   return null;

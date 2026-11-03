@@ -129,7 +129,8 @@ try {
     if (packet.error) waiter.reject(new Error(packet.error.message)); else waiter.resolve(packet.result);
   };
   await new Promise<void>((resolve, reject) => { socket!.onopen = () => resolve(); socket!.onerror = () => reject(new Error("Chrome connection failed")); });
-  await command("Page.enable"); await command("Runtime.enable");
+  await command("Page.enable");
+  await command("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' }); await command("Runtime.enable");
   const exp = Math.floor(Date.now() / 1000) + 3600;
   const token = `${Buffer.from('{"alg":"HS256"}').toString("base64url")}.${Buffer.from(JSON.stringify({ sub: owner, role: "authenticated", aud: "authenticated", exp })).toString("base64url")}.browser-fixture-signature`;
   const session = { access_token: token, refresh_token: "browser-fixture-refresh", token_type: "bearer", expires_at: exp, expires_in: 3600, user };

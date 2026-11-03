@@ -51,7 +51,8 @@ async function connect(wsUrl: string) {
   } const waiter = pending.get(packet.id); if (!waiter) return; pending.delete(packet.id); if (packet.error) waiter.reject(new Error(packet.error.message)); else waiter.resolve(packet.result); };
   await new Promise<void>(resolve => { ws.onopen = () => resolve(); });
   const evaluate = async (expression: string) => { const data = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (data.exceptionDetails) throw new Error('Browser expression failed: ' + expression.slice(0, 120)); return data.result.value; };
-  await send('Page.enable'); await send('Runtime.enable');
+  await send('Page.enable');
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' }); await send('Runtime.enable');
   await send('Fetch.enable', { patterns: [{ urlPattern: 'https://*' }] });
   return { send, evaluate, commits: () => commits, close: () => ws.close() };
 }
@@ -66,11 +67,13 @@ try {
   const token = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.${Buffer.from(JSON.stringify({ sub: owner, exp, role: 'authenticated', aud: 'authenticated' })).toString('base64url')}.fixture`;
   const session = () => ({ access_token: token, refresh_token: 'fixture-refresh', expires_at: exp, expires_in: 3600, token_type: 'bearer', user });
   const signedIn = async () => { await evaluate(`localStorage.setItem('sb-127-auth-token', ${JSON.stringify(JSON.stringify(session()))})`); };
-  const go = async (route: string, text: string) => { const before = first!.commits(); await send('Page.navigate', { url: new URL(route, server.url).href }); await until(async () => first!.commits() > before, route + ' committed'); await until(async () => await evaluate(`!!document.body?.innerText.includes(${JSON.stringify(text)})`), route); await evaluate('document.fonts.ready'); await delay(150); };
-  const shot = async (name: string) => { const data = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(path.join(evidence, name + '.png'), Buffer.from(data.data, 'base64')); };
+  const go = async (route: string, text: string) => { const before = first!.commits(); await send('Page.navigate', { url: new URL(route, server.url).href }); await until(async () => first!.commits() > before, route + ' committed'); await until(async () => await evaluate(`!!document.body?.innerText.includes(${JSON.stringify(text)})`), route).catch(async error=>{console.error('Fixture route state',await evaluate("({path:location.pathname,body:document.body?.innerText.slice(0,300),resources:performance.getEntriesByType('resource').slice(-6).map(r=>new URL(r.name).pathname)})"));throw error;}); await evaluate('document.fonts.ready'); await delay(150); };
+  const shot = async (name: string) => { await send('Page.bringToFront'); const data = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(path.join(evidence, name + '.png'), Buffer.from(data.data, 'base64')); };
   const sizes = [{ width: 1440, height: 1000 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 320, height: 700 }];
   await go('/dashboard', 'Guest workspace'); await signedIn(); await go('/account', 'Ada Curious');
   assert.ok(await evaluate("document.body.innerText.includes('Google · GitHub')"));
+  assert.equal(await evaluate("!!document.querySelector('.avatar img')"), false, 'avatar waits for user action');
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.innerText==='Load provider profile picture').click()");
   await until(async () => await evaluate("document.querySelector('.avatar img')?.naturalWidth > 0"), 'supplied provider image');
   await shot('account-provider-avatar');
   avatarFails = true;
@@ -134,8 +137,9 @@ try {
   // fixture sign-in is needed; never restore old credentials to offer a retry.
   await signedIn(); await go('/account', 'Your account.');
   // A second real tab shares Supabase's auth BroadcastChannel and has an active stream.
-  const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(server.url.href + 'dashboard/' + thread)}`, { method: 'PUT' })).json() as any;
+  const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`, { method: 'PUT' })).json() as any;
   second = await connect(tab.webSocketDebuggerUrl);
+  await second.send('Page.navigate',{url:server.url.href+'dashboard/'+thread});
   await until(async () => await second!.evaluate("!!document.querySelector('#question')"), 'second tab');
   await second.evaluate("(()=>{const i=document.querySelector('#question'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,'fixture stream');i.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await until(async () => await second!.evaluate("document.querySelector('[aria-label=\"Send question\"]')?.disabled === false"), 'send ready');

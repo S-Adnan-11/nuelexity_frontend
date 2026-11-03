@@ -31,6 +31,7 @@ import { useConversationLibrary } from "@/lib/useConversationLibrary";
 import { validThreadId, threadPath } from "@/lib/thread-navigation";
 import { accountProfile } from "../../lib/profile";
 import { Avatar } from "../Avatar";
+import { ThemeToggle } from "../ThemeToggle";
 import { Footer } from "../Footer";
 import type { Message, ModelCatalogue } from "@/lib/types";
 import { answerModelLabel } from "@/lib/models";
@@ -649,7 +650,7 @@ function Workspace() {
           <span>
             <Globe size={14} /> Search the web
           </span>
-          {session ? <Link className="plan-label workspace-account" to="/account" aria-label="Open your account"><Avatar user={session.user} size={26} /><span>Personal workspace</span></Link> : <span className="plan-label">Guest workspace</span>}
+          <div className="workspace-tools">{session ? <Link className="plan-label workspace-account" to="/account" aria-label="Open your account"><Avatar user={session.user} size={26} /><span>Personal workspace</span></Link> : <span className="plan-label">Guest workspace</span>}<ThemeToggle /></div>
         </header>
         <div className={`research-content ${(messages.length || threadStatus !== "idle") ? "has-messages" : ""}`}>
           <div className="conversation-scroll" ref={scrollRef} onScroll={() => {

@@ -142,7 +142,8 @@ try {
   socket = new WebSocket(tabs.find(tab => tab.type === "page").webSocketDebuggerUrl);
   socket.onmessage = message => { const packet = JSON.parse(String(message.data)); const task = pending.get(packet.id); if (!task) return; pending.delete(packet.id); packet.error ? task.reject(new Error(packet.error.message)) : task.resolve(packet.result); };
   await new Promise<void>((resolve, reject) => { socket!.onopen = () => resolve(); socket!.onerror = () => reject(new Error("Chrome connection failed")); });
-  await command("Page.enable"); await command("Runtime.enable"); await command("Network.enable");
+  await command("Page.enable");
+  await command("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' }); await command("Runtime.enable"); await command("Network.enable");
   await command("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   const injection = await command("Page.addScriptToEvaluateOnNewDocument", { source: `
     if (!sessionStorage.getItem('fixture-booted')) {

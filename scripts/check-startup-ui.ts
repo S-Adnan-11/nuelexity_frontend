@@ -89,6 +89,7 @@ try {
   const session = { access_token: token, refresh_token: "fixture", token_type:"bearer", expires_at:exp, user };
   await command("Page.addScriptToEvaluateOnNewDocument", { source: `
     localStorage.clear(); sessionStorage.clear();
+    sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));
     const entry = new URL(location.href).searchParams.get('entry');
     if (entry === 'signed') localStorage.setItem('sb-127-auth-token', ${JSON.stringify(JSON.stringify(session))});
     if (entry === 'returning') sessionStorage.setItem('nuelexity.guest-pass.v1', 'v1.fixture.signature');

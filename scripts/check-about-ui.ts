@@ -17,7 +17,7 @@ const server = await serveFixture(async req => {
   }
   return staticResponse("dist", url.pathname);
 });
-const evidence = path.resolve(process.env.BROWSER_EVIDENCE || "docs/evidence/frontend-v1-2026-10-28");
+const evidence = path.resolve(process.env.BROWSER_EVIDENCE || "docs/evidence/policy-corrections-2026-10-30/about");
 await mkdir(evidence, { recursive: true });
 const profile = await mkdtemp("/tmp/nuelexity-about-chrome-");
 const chrome = launchChrome(profile);
@@ -106,7 +106,8 @@ try {
     if (waiter) { pending.delete(packet.id); packet.error ? waiter.reject(new Error(packet.error.message)) : waiter.resolve(packet.result); }
   };
   await new Promise<void>(resolve => { socket!.onopen = () => resolve(); });
-  await send("Page.enable"); await send("Runtime.enable");
+  await send("Page.enable");
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' }); await send("Runtime.enable");
   await send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
   // Instrument the browser clock only in this fixture. The product has no seek UI.
   await send("Page.addScriptToEvaluateOnNewDocument", { source: `
@@ -125,6 +126,8 @@ try {
   ` });
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 700, deviceScaleFactor: 1, mobile: false });
   await go();
+  assert.equal(await evaluate("!!document.querySelector('.demo-titlebar').closest('.demo-playback')"), false, "window frame stays outside the camera");
+  assert.equal(await evaluate("document.querySelectorAll('.window-dots i').length"),3);
   assert.equal(await evaluate("getComputedStyle(document.querySelector('.demo-measurements')).opacity"), "0", "responsive measurement copies cannot paint over playback");
   assert.equal(await evaluate(demo(".dataset.playing")), "false", "offscreen demo starts paused");
   assert.equal(await evaluate("window.__demoAudit.frames.size"), 0);
@@ -174,7 +177,7 @@ try {
 
   const layouts: object[] = [];
   const checkpoints=[700,3700,6100,7500,10000,13100,18200,27000,30200,34000,36900,38500,41000,44000,49000,58000,63500,500];
-  for (const width of [1440,768,390,320]) {
+  for (const width of [1920,1440,768,390,320]) {
     await send("Emulation.setDeviceMetricsOverride", { width, height: width<800?900:1000, deviceScaleFactor:1,mobile:width<800 });
     for(const theme of ["dark","light"]) {
       await go();
@@ -192,7 +195,7 @@ try {
         if(t===6100) {assert.equal(m.draft,demoQuestion);assert.equal(m.model,demoModels[0]);assert.ok(m.scale>1.04,"composer zoom");}
         if(t===36900) {assert.equal(m.draft,demoFollowUp);assert.equal(m.model,demoModels[1]);}
         layouts.push({width,theme,checkpoint:t,...m});
-        if([1440,390].includes(width)&&[6100,30200,36900,58000].includes(t)) {
+        if([1920,1440,390].includes(width)&&[6100,30200,36900,58000].includes(t)) {
           await shot(`demo-${width}-${theme}-${t}`);
           if([6100,36900].includes(t))await composerShot(`composer-${width}-${theme}-${t}`);
         }
@@ -200,7 +203,7 @@ try {
     }
   }
   await send("Emulation.setEmulatedMedia", { features:[{name:"prefers-reduced-motion",value:"reduce"}] });
-  for(const width of [1440,768,390,320]) {
+  for(const width of [1920,1440,768,390,320]) {
     await send("Emulation.setDeviceMetricsOverride", {width,height:width<800?900:1000,deviceScaleFactor:1,mobile:width<800});
     for(const theme of ["dark","light"]) {
       await evaluate(`document.documentElement.dataset.theme='${theme}';window.scrollTo(0,0)`);await delay(120);
@@ -209,7 +212,7 @@ try {
       assert.equal(await evaluate("getComputedStyle(document.querySelector('.return-cat-eye')).animationName"),"none");
       assert.ok(await evaluate("(()=>{const pane=document.querySelector('.demo-viewport').getBoundingClientRect(),end=[...document.querySelectorAll('.demo-thread .answer-text p')].at(-1).getBoundingClientRect();return end.bottom<=pane.bottom&&end.top>=pane.top})()"),"ending readable on resize "+width);
       assert.ok(await evaluate("[...document.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0)"));
-      if([1440,390].includes(width)) {
+      if([1920,1440,390].includes(width)) {
         await shot(`about-${width}-${theme}-full`,true);await shot(`about-${width}-${theme}-cat`);
         await evaluate("document.querySelector('.product-demo').scrollIntoView({block:'start',behavior:'instant'})");await shot(`about-${width}-${theme}-demo`);
       }
@@ -260,7 +263,7 @@ try {
     await rm(path.join(evidence,"demo-frames"),{recursive:true,force:true});
   }
   await writeFile(path.join(evidence,"about-verification.json"),JSON.stringify({layouts,phases:[...phases],cycleSeconds:demoDuration/1000,applicationApiRequests:failures,externalRequests:external,requestedPaths:[...new Set(requests)],closures,offscreenPause:true,actualBackgroundTabPause:true,hoverDoesNotFreeze:true,reducedMotionStatic:true,unmountCleanup:true,stableDocumentAndFocus:true,accessibilityTreeChecked:true,recordedFrames:frames.length,physicalDevices:false,screenReaderManuallyTested:false},null,2));
-  console.log("PASS About: exact prompts/models, 64s coordinated loop, camera framing, internal scroll/read holds, centered send icon, repeating short blink, zero API/provider requests, background/offscreen pause, no hover freeze, reduced motion, cleanup, both themes at 320/390/768/1440. Evidence: "+evidence);
+  console.log("PASS About: exact prompts/models, 64s coordinated loop, camera framing, internal scroll/read holds, centered send icon, repeating short blink, zero API/provider requests, background/offscreen pause, no hover freeze, reduced motion, cleanup, both themes at 320/390/768/1440/1920. Evidence: "+evidence);
 } finally {
   socket?.close();chrome.kill();await chrome.exited;server.stop();
   await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:150});

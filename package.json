@@ -25,9 +25,15 @@
     "test:about-details": "tsx scripts/check-about-details-ui.ts",
     "build:pages": "node scripts/pages-build.mjs",
     "pages:prepare": "node scripts/pages-build.mjs --review",
-    "pages:acceptance": "node scripts/pages-build.mjs --acceptance-candidate",
     "test:pages": "tsx scripts/check-pages-ui.ts",
-    "audit:release": "node scripts/audit-release.mjs"
+    "audit:release": "node scripts/audit-release.mjs",
+    "public:prepare": "node scripts/public-pages-build.mjs --review",
+    "build:public": "node scripts/public-pages-build.mjs",
+    "release:public": "node scripts/release-check.mjs --public-info",
+    "test:public": "tsx scripts/check-public-information.ts",
+    "test:eligibility": "tsx scripts/check-eligibility-ui.ts",
+    "policy:export": "node scripts/export-policy.mjs",
+    "test:theme": "tsx scripts/check-theme-ui.ts"
   },
   "dependencies": {
     "@radix-ui/react-label": "2.1.15",

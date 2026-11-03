@@ -16,5 +16,10 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run test:browser
+      - run: npm run test:eligibility
+      - run: npm run test:theme
+      - run: npm run test:about
+      - run: npm run test:about-details
+      - run: npm run build:public
       - run: npm prune --omit=dev
       - run: npm run test:startup

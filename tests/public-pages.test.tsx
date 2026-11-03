@@ -1,16 +1,17 @@
 import { test, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { StaticRouter } from 'react-router';
-import { About, Legal } from '../src/components/pages/PublicPages';
+import { About, Legal, PublicInformation } from '../src/components/pages/PublicPages';
 import { routeMetadata } from '../src/lib/seo';
 
-test('legal sections have stable unique anchors and the draft cannot claim to be effective', () => {
+test('legal sections keep stable anchors without internal review commentary or an invented effective date', () => {
   const html = renderToStaticMarkup(<StaticRouter location="/legal"><Legal /></StaticRouter>);
   for (const id of ['privacy', 'cookies', 'terms']) {
     expect(html.match(new RegExp(`id="${id}"`, 'g'))).toHaveLength(1);
     expect(html).toContain(`href="/legal#${id}"`);
   }
-  expect(html).toContain('not yet effective');
+  expect(html).not.toMatch(/Local pre-release review|Policy draft|workflow.*approval|6,000|1,024|400 characters|62 days/);
+  expect(html).not.toContain('Effective <time');
   expect(html).not.toContain('accept everything</button>');
 });
 test('About has original crawlable content and confirmed developer links', () => {
@@ -29,4 +30,12 @@ test('only intended public routes are indexable; private metadata never uses a t
     expect(routeMetadata(route).index).toBe(false);
     expect(routeMetadata(route).canonical).toBeNull();
   }
+});
+
+test('public preview and full application receive accurate release-specific legal introductions', () => {
+  const render = (limited: boolean) => renderToStaticMarkup(<StaticRouter location="/legal"><PublicInformation value={limited}><Legal /></PublicInformation></StaticRouter>);
+  expect(render(true)).toContain('Research and sign-in are closed.');
+  expect(render(false)).not.toContain('Research and sign-in are closed.');
+  expect(render(true)).toContain('preference is saved in local storage');
+  expect(render(false)).toContain('automatically loads Cloudflare Turnstile');
 });

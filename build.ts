@@ -4,14 +4,19 @@ import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StaticRouter } from "react-router";
-import { About, Legal, NotFound, PublicHome } from "./src/components/pages/PublicPages";
+import { About, Legal, NotFound, PublicHome, PublicInformation, Unavailable } from "./src/components/pages/PublicPages";
 import { canonicalOrigin, routeMetadata } from "./src/lib/seo";
 import { publicEnv } from "./public-env.mjs";
 import content from "./site-content.json";
 
-await build();
-await writeFile("dist/config.json", JSON.stringify(publicEnv(), null, 2) + "\n");
-const template = await readFile("dist/index.html", "utf8");
+const limited = process.argv.includes("--public-info");
+const output = limited ? "public-build" : "dist";
+await build(limited ? { plugins: [{ name: "public-information-boundary", generateBundle() {
+  for (const id of this.getModuleIds()) if (/@supabase\/|\/(?:PrivateApp|AuthProvider|OAuthButtons|Turnstile)\.tsx$|\/lib\/(?:api|startup|config|useGuestSession)\.ts$|\/pages\/(?:Dashboard|Account|Auth)\.tsx$/.test(id)) throw new Error("Private integration imported into the limited public bundle.");
+} }], build: { outDir: "../public-build", rollupOptions: { input: "src/public-information.html" } } } : {});
+await writeFile(`${output}/release-mode.json`, JSON.stringify({ mode: limited ? "public-information" : "application" }));
+if (!limited) await writeFile(`${output}/config.json`, JSON.stringify(publicEnv(), null, 2) + "\n");
+const template = await readFile(`${output}/${limited ? "public-information.html" : "index.html"}`, "utf8");
 const escape = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 const scripts: string[] = [];
 function document(path: string, body: string) {
@@ -33,20 +38,20 @@ function document(path: string, body: string) {
   return html;
 }
 for (const [route, Component] of [['/', PublicHome], ['/about', About], ['/legal', Legal], ['/404', NotFound]] as const) {
-  const html = document(route, renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(Component))));
-  const file = route === '/' ? 'dist/index.html' : route === '/404' ? 'dist/404.html' : `dist${route}/index.html`;
+  const html = document(route, renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: limited }, createElement(Component)))));
+  const file = route === '/' ? `${output}/index.html` : route === '/404' ? `${output}/404.html` : `${output}${route}/index.html`;
   await mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
   await writeFile(file, html);
 }
 for (const route of ['/account', '/auth', '/auth/callback', '/dashboard']) {
-  await mkdir(`dist${route}`, { recursive: true });
-  await writeFile(`dist${route}/index.html`, document(route, '<main class="workspace-pending" role="status">Opening Nuelexity…</main>'));
+  await mkdir(`${output}${route}`, { recursive: true });
+  await writeFile(`${output}${route}/index.html`, document(route, limited ? renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening Nuelexity…</main>'));
 }
-await writeFile('dist/private.html', document('/dashboard', '<main class="workspace-pending" role="status">Opening your workspace…</main>'));
-await writeFile('dist/sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/about', '/legal'].map(route => `<url><loc>${canonicalOrigin}${route}</loc></url>`).join('')}</urlset>\n`);
+await writeFile(`${output}/private.html`, document('/dashboard', limited ? renderToStaticMarkup(createElement(StaticRouter, { location: '/dashboard' }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening your workspace…</main>'));
+await writeFile(`${output}/sitemap.xml`, `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/about', '/legal'].map(route => `<url><loc>${canonicalOrigin}${route}</loc></url>`).join('')}</urlset>\n`);
 // Let crawlers see private routes' noindex. Robots exclusions cannot protect data.
-await writeFile('dist/robots.txt', `User-agent: *\nAllow: /\nSitemap: ${canonicalOrigin}/sitemap.xml\n`);
-await writeFile('dist/csp-hashes.json', JSON.stringify(scripts));
-await writeFile('dist/policy-source.sha256', createHash('sha256').update(await readFile('src/components/pages/PublicPages.tsx')).digest('hex'));
-await writeFile('dist/content.sha256', createHash('sha256').update(JSON.stringify(content)).digest('hex'));
+await writeFile(`${output}/robots.txt`, `User-agent: *\nAllow: /\nSitemap: ${canonicalOrigin}/sitemap.xml\n`);
+await writeFile(`${output}/csp-hashes.json`, JSON.stringify(scripts));
+await writeFile(`${output}/policy-source.sha256`, createHash('sha256').update(await readFile('src/components/pages/PublicPages.tsx')).digest('hex'));
+await writeFile(`${output}/content.sha256`, createHash('sha256').update(JSON.stringify(content)).digest('hex'));
 console.log('Public pages prerendered; private routes have generic noindex HTML. Publication remains subject to release:check.');

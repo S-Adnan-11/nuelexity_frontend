@@ -49,11 +49,21 @@ async function rejectSymlinks(dir) {
     if (entry.isDirectory()) await rejectSymlinks(path.join(dir, entry.name));
   }
 }
-export async function preparePages(source, destination) {
-  if (!["pages-review", "pages-dist", "pages-acceptance-dist"].includes(path.basename(destination))) throw new Error("Unexpected Pages output directory.");
-  const settings = JSON.parse(await readFile(path.join(source, "config.json"), "utf8"));
+export function publicInformationHeaders(hashes) {
+  if (!Array.isArray(hashes) || !hashes.length || hashes.some(hash => !/^'sha256-[A-Za-z0-9+/]{43}='$/.test(hash))) throw new Error("Invalid structured-data CSP hashes.");
+  return ["/*", "  X-Content-Type-Options: nosniff", "  Referrer-Policy: no-referrer", "  X-Frame-Options: DENY", "  Permissions-Policy: camera=(), microphone=(), geolocation=()",
+    `  Content-Security-Policy: default-src 'none'; script-src 'self' ${hashes.join(" ")}; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; frame-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; manifest-src 'self'`,
+    "  Cache-Control: public, max-age=0, must-revalidate", "", "/assets/*", "  Cache-Control: public, max-age=31536000, immutable", "",
+    ...["/account", "/account/*", "/auth", "/auth/*", "/dashboard", "/dashboard/*", "/private", "/404.html"].flatMap(route => [route, "  Cache-Control: private, no-store", "  X-Robots-Tag: noindex, nofollow", ""]),
+    "https://:project.pages.dev/*", "  X-Robots-Tag: noindex", "", "https://:version.:project.pages.dev/*", "  X-Robots-Tag: noindex", ""].join("\n");
+}
+export const publicInformationRedirects = [pagesRedirects.trim(), "/auth/* /private 200", "/account/* /private 200", ""].join("\n");
+export async function preparePages(source, destination, { limited = false } = {}) {
+  if (!["pages-review", "pages-dist", "pages-public-review", "pages-public-dist"].includes(path.basename(destination))) throw new Error("Unexpected Pages output directory.");
+  if (limited && JSON.parse(await readFile(path.join(source, "release-mode.json"), "utf8")).mode !== "public-information") throw new Error("Limited release requires the separate public-information build.");
+  const settings = limited ? null : JSON.parse(await readFile(path.join(source, "config.json"), "utf8"));
   const hashes = JSON.parse(await readFile(path.join(source, "csp-hashes.json"), "utf8"));
-  const headers = pagesHeaders(settings, hashes);
+  const headers = limited ? publicInformationHeaders(hashes) : pagesHeaders(settings, hashes);
   await rejectSymlinks(source);
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
@@ -62,7 +72,7 @@ export async function preparePages(source, destination) {
     await mkdir(path.dirname(path.join(destination, to)), { recursive: true });
     await cp(path.join(source, from), path.join(destination, to));
   }
-  for (const file of ["config.json", "robots.txt", "sitemap.xml", "assets", "brand"]) await cp(path.join(source, file), path.join(destination, file), { recursive: true });
+  for (const file of [...(limited ? [] : ["config.json"]), "robots.txt", "sitemap.xml", "theme-init.js", "assets", "brand"]) await cp(path.join(source, file), path.join(destination, file), { recursive: true });
   await writeFile(path.join(destination, "_headers"), headers);
-  await writeFile(path.join(destination, "_redirects"), pagesRedirects);
+  await writeFile(path.join(destination, "_redirects"), limited ? publicInformationRedirects : pagesRedirects);
 }

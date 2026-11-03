@@ -56,7 +56,8 @@ try{
     }
     const w=pending.get(p.id);if(w){pending.delete(p.id);p.error?w.reject(new Error(p.error.message)):w.resolve(p.result);}
   };
-  await new Promise<void>(resolve=>{socket!.onopen=()=>resolve()});await send('Page.enable');await send('Runtime.enable');await send('Log.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*'}]});
+  await new Promise<void>(resolve=>{socket!.onopen=()=>resolve()});await send('Page.enable');
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' });await send('Runtime.enable');await send('Log.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*'}]});
   const layouts:object[]=[];
   for(const width of [1440,390])for(const theme of ['dark','light']){
     await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<800});

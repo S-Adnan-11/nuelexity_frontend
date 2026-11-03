@@ -56,3 +56,13 @@ docs/FRONTEND_POLISH_REVIEW.md
 docs/MILESTONE_VERIFICATION.md
 docs/RENDER_LOCAL_VERIFICATION.md
 docs/PREDEPLOYMENT.md
+
+# Staged public-information builds and private operator procedures.
+public-build/
+pages-public-review/
+pages-public-dist/
+docs/private/
+
+# Private policy working reports; publish only the assembled visitor copy.
+docs/POLICY_IMPLEMENTATION.md
+docs/POLICY_RELEASE_DELIVERY.md

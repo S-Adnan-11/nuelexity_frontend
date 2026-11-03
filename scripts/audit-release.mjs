@@ -6,7 +6,7 @@ import path from "node:path";
 const git = args => execFileSync("git", args, { encoding: "utf8" }).trim();
 const root = git(["rev-parse", "--show-toplevel"]);
 const staged = git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"]);
-const files = (staged || git(["ls-files"])).split("\n").filter(Boolean);
+const files = (staged || git(["ls-files", "--cached", "--others", "--exclude-standard"])).split("\n").filter(Boolean);
 const privateValues = new Set();
 for (const dir of [root, path.resolve(root, "../../backend/nuelexity_backend")]) for (const name of [".env", ".env.local", ".env.production"]) {
   let text = ""; try { text = await readFile(path.join(dir, name), "utf8"); } catch { continue; }
@@ -18,7 +18,7 @@ for (const dir of [root, path.resolve(root, "../../backend/nuelexity_backend")])
   }
 }
 const problems = [];
-const localOnly = /^(?:\.env(?:\..*)?$|(?:dist|pages-dist|pages-acceptance-dist|pages-review|node_modules|\.wrangler)\/|docs\/(?:evidence\/|FRONTEND_POLISH_REVIEW\.md|MILESTONE_VERIFICATION\.md|RENDER_LOCAL_VERIFICATION\.md|PREDEPLOYMENT\.md|RETURN_CAT_IMPLEMENTATION\.md))|\.(?:har|mp4|webm|log)$/i;
+const localOnly = /^(?:\.env(?:\..*)?$|(?:dist|public-build|pages-public-dist|pages-public-review|pages-dist|pages-acceptance-dist|pages-review|node_modules|\.wrangler)\/|docs\/(?:evidence\/|private\/|POLICY_IMPLEMENTATION\.md|POLICY_RELEASE_DELIVERY\.md|FRONTEND_POLISH_REVIEW\.md|MILESTONE_VERIFICATION\.md|RENDER_LOCAL_VERIFICATION\.md|PREDEPLOYMENT\.md|RETURN_CAT_IMPLEMENTATION\.md))|\.(?:har|mp4|webm|log)$/i;
 const credential = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|sb_secret_[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16})\b/;
 for (const file of files) {
   if (file !== ".env.example" && localOnly.test(file)) problems.push({ file, reason: "Local/private artifact staged" });
@@ -53,6 +53,6 @@ async function scanArtifact(dir, label) {
     if (credential.test(text) || [...privateValues].some(value => bytes.includes(Buffer.from(value)))) problems.push({ file, reason: "Private/credential-shaped value in build output" });
   }
 }
-for (const dir of ["dist", "pages-review", "pages-dist", "pages-acceptance-dist"]) await scanArtifact(path.join(root, dir), dir);
+for (const dir of ["dist", "pages-review", "pages-dist", "pages-acceptance-dist", "public-build", "pages-public-review", "pages-public-dist"]) await scanArtifact(path.join(root, dir), dir);
 if (problems.length) { console.error(JSON.stringify(problems, null, 2)); process.exitCode = 1; }
-else console.log(`PASS release file audit: ${files.length} ${staged ? "staged" : "tracked"} files, ${historyFiles} outgoing-history file snapshots and ${artifacts} artifact files; no configured private values, credential-shaped content, symlinks or local evidence/config artifacts detected. Human diff review is still required.`);
+else console.log(`PASS release file audit: ${files.length} ${staged ? "staged" : "tracked/new"} files, ${historyFiles} outgoing-history file snapshots and ${artifacts} artifact files; no configured private values, credential-shaped content, symlinks or local evidence/config artifacts detected. Human diff review is still required.`);

@@ -1,15 +1,13 @@
 import { Component, lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Link, Route, Routes } from "react-router";
-import Auth from "./components/pages/Auth";
+import { EligibilityGate } from "./components/EligibilityGate";
 import { BrandLogo, WorkspaceSkeleton } from "./components/Brand";
 
-import Account from "./components/pages/Account";
 import { About, Legal, NotFound } from "./components/pages/PublicPages";
 import { RouteEffects } from "./components/RouteEffects";
-import { AuthProvider } from "./components/AuthProvider";
 
-// Public pages do not need the workspace, stream client or model-menu bundle.
-const Dashboard = lazy(() => import("./components/pages/Dashboard"));
+// Private code, including the shared auth client, loads after the declaration.
+const PrivateApp = lazy(() => import("./PrivateApp"));
 class WorkspaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   override state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
@@ -22,23 +20,21 @@ class WorkspaceBoundary extends Component<{ children: ReactNode }, { failed: boo
     return this.props.children;
   }
 }
-const workspace = <WorkspaceBoundary><Suspense fallback={<WorkspaceSkeleton />}><Dashboard /></Suspense></WorkspaceBoundary>;
+const workspace = <WorkspaceBoundary><Suspense fallback={<WorkspaceSkeleton />}><PrivateApp /></Suspense></WorkspaceBoundary>;
 
 export function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <RouteEffects /><Routes>
-          <Route path="/" element={workspace} />
-          <Route path="/dashboard/:conversationId?" element={workspace} />
-          <Route path="/account" element={<Account />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/legal" element={<Legal />} />
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/auth/callback" element={<Auth />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </AuthProvider>
+      <RouteEffects /><Routes>
+        <Route path="/about" element={<About />} />
+        <Route path="/legal" element={<Legal />} />
+        <Route path="/" element={<EligibilityGate>{workspace}</EligibilityGate>} />
+        <Route path="/dashboard/:conversationId?" element={<EligibilityGate>{workspace}</EligibilityGate>} />
+        <Route path="/auth" element={<EligibilityGate>{workspace}</EligibilityGate>} />
+        <Route path="/auth/callback" element={<EligibilityGate>{workspace}</EligibilityGate>} />
+        <Route path="/account" element={<EligibilityGate>{workspace}</EligibilityGate>} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </BrowserRouter>
   );
 }

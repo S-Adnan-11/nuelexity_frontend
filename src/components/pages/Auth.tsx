@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { useAuth } from "../AuthProvider";
 import { BrandMark } from "../Brand";
+import { ThemeToggle } from "../ThemeToggle";
 import { Footer } from "../Footer";
 import { OAuthButtons } from "../OAuthButtons";
 import { rememberSignInThread, takeSignInThread, threadPath, validThreadId } from "@/lib/thread-navigation";
@@ -42,6 +43,7 @@ export default function Auth() {
   }, [callback, session, loading]);
   return (
     <main id="page-content" tabIndex={-1} className="auth-page">
+      <div className="auth-theme"><ThemeToggle /></div>
       <Link to="/dashboard" className="back-link">
         <ArrowLeft size={16} /> Back to search
       </Link>
