@@ -13,7 +13,7 @@ async function fixture() {
   const root = await mkdtemp("/tmp/nuelexity-release-test-"); temp.push(root);
   await mkdir(path.join(root, "dist/legal"), { recursive: true });
   await mkdir(path.join(root, "src/components/pages"), { recursive: true });
-  const content = { operator: "Adnan Muhammad Sadiq", privacyContact: "s.adnan.werk@gmail.com", effectiveDate: "2026-10-28", publicationApproved: true, ownerDecisionsReviewed: true, googleBrandingVerified: true };
+  const content = { operator: "Adnan Muhammad Sadiq", privacyContact: "s.adnan.werk@gmail.com", effectiveDate: "2026-10-28", publicationApproved: true, ownerDecisionsReviewed: true, googleBrandingVerified: true, publicHostingReviewed: true, applicationProviderReviewComplete: true, productionAcceptanceComplete: true };
   await writeFile(path.join(root, "site-content.json"), JSON.stringify(content));
   await writeFile(path.join(root, "dist/content.sha256"), createHash("sha256").update(JSON.stringify(content)).digest("hex"));
   await writeFile(path.join(root, "src/components/pages/PublicPages.tsx"), "approved fixture source");

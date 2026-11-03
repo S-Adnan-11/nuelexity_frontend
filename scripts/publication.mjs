@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 export const pendingPolicyText = /Policy draft for review|Local policy preview|not yet effective|must be approved before public beta|workflow still needs final approval|remain part of the pre-release review/;
-export async function publicationBlockers({ root = fileURLToPath(new URL("../", import.meta.url)), checkBuild = true } = {}) {
+export async function publicationBlockers({ root = fileURLToPath(new URL("../", import.meta.url)), checkBuild = true, release = "application" } = {}) {
+  if (!["application", "acceptance-candidate"].includes(release)) throw new Error("Unknown release stage.");
   const content = JSON.parse(await readFile(path.join(root, "site-content.json"), "utf8"));
   const blockers = [];
   if (!content.operator?.trim()) blockers.push("Confirmed operator name");
@@ -13,6 +14,10 @@ export async function publicationBlockers({ root = fileURLToPath(new URL("../", 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(content.effectiveDate || "") || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== content.effectiveDate) blockers.push("Approved effective date");
   if (content.ownerDecisionsReviewed !== true) blockers.push("Eligibility, lawful bases/transfers, retention/provider controls and manual rights workflow policy approval");
   if (content.publicationApproved !== true) blockers.push("Final policy copy and publication approval");
+  if (content.publicHostingReviewed !== true) blockers.push("Cloudflare Pages account/DPA, network retention and Nigerian transfer-ground evidence (PUBLIC-HOST; see docs/CLOUDFLARE_PAGES_RELEASE.md)");
+  if (content.applicationProviderReviewComplete !== true) blockers.push("Supabase/Render regions, Tavily/Groq controls, agreements and Article 18 transfer arrangements (APP-1 to APP-5)");
+  if (release === "application" && content.productionAcceptanceComplete !== true) blockers.push("Owner production acceptance for full application launch");
+  if (release === "acceptance-candidate" && content.productionAcceptanceComplete !== false) blockers.push("Record productionAcceptanceComplete: false for the untested candidate");
   if (content.googleBrandingVerified !== true) blockers.push("Owner confirmation of Google branding verification");
   if (checkBuild && content.publicationApproved === true) {
     try {

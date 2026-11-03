@@ -286,6 +286,13 @@ a { color: inherit; text-decoration: none; }
 .developer-card { display: flex; align-items: flex-start; gap: 24px; margin: 55px 0 30px; padding: 28px; border: 1px solid var(--nx-divider); border-radius: 18px; background: var(--nx-surface); }
 .developer-card h2 { font-size: 28px; margin-bottom: 14px; }
 .developer-card .eyebrow { margin-top: 0; }
+.developer-card nav { position: relative; gap: 12px; }
+.developer-link { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--nx-control-border); border-radius: 10px; }
+.developer-link:hover, .developer-link:focus-visible { background: var(--nx-surface-raised); }
+.developer-link > svg { display: block; flex-shrink: 0; }
+.developer-link-label { position: absolute; left: 0; bottom: calc(100% + 8px); width: max-content; max-width: min(280px, calc(100vw - 160px)); padding: 8px 10px; border: 1px solid var(--nx-control-border); border-radius: 8px; background: var(--nx-surface); color: var(--nx-text); font-size: 12px; line-height: 1.6; visibility: hidden; z-index: 1; }
+.developer-link-label::after { content: ""; position: absolute; top: 100%; left: 0; width: 100%; height: 9px; }
+.developer-link:not([data-label-dismissed]):is(:hover, :focus-visible) .developer-link-label { visibility: visible; }
 .document-title { padding: 65px 0 35px; }
 .legal-nav { display: flex; gap: 8px 24px; flex-wrap: wrap; border-block: 1px solid var(--nx-divider); padding: 12px 0; }
 .legal-nav a { min-height: 44px; display: inline-flex; align-items: center; }
@@ -356,3 +363,27 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 370px) { .document-header nav > a:first-child { display: none; } .workspace-account > span:last-child { display: none; } }
 @media (max-height: 650px) { .research-main:has(textarea:focus) .compact-footer { display: none; } }
 [data-compact-viewport="true"] .research-main:has(textarea:focus) .compact-footer { display: none; }
+
+/* The outer window is still; only .demo-playback follows the approved camera. */
+.about-page { max-width: 1520px; }
+.about-page .about-hero > div:first-child { max-width: 640px; }
+.demo-story { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 44px; align-items: center; }
+.demo-story .product-demo { width: 100%; max-width: none; min-width: 0; }
+.demo-notes { max-width: 35ch; }
+.document-page .demo-notes h3 { margin: 0 0 8px; }
+.demo-notes p { margin: 0 0 28px; }
+.demo-window { border-color: var(--nx-divider); border-radius: 16px; box-shadow: 0 10px 28px #00000029; }
+[data-theme="light"] .demo-window { box-shadow: 0 8px 24px #1c282114; }
+.demo-titlebar { height: 38px; display: grid; grid-template-columns: 56px minmax(0, 1fr) 56px; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--nx-divider); background: var(--nx-surface); color: var(--nx-text); font-size: 12px; }
+.demo-window-title { grid-column: 2; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.window-dots { display: flex; align-items: center; gap: 6px; }
+.window-dots i { width: 8px; height: 8px; border-radius: 50%; background: #ff6058; }
+.window-dots i:nth-child(2) { background: #ffbd2e; }
+.window-dots i:nth-child(3) { background: #28c840; }
+.demo-topbar { min-height: 48px; padding: 10px 16px; }
+.demo-story .demo-draft { height: 80px; }
+@media (max-width: 800px) { .demo-story .demo-draft { height: 104px; } }
+.about-page .two-column > div:last-child { max-width: 65ch; }
+.about-page .stack-list li > span { max-width: 72ch; }
+@media (min-width: 1100px) { .demo-story .demo-viewport { height: 500px; } }
+@media (max-width: 1100px) { .demo-story { grid-template-columns: 1fr; gap: 28px; } .demo-notes { max-width: 65ch; } }

@@ -22,8 +22,10 @@
     "test:startup": "node scripts/check-brand-serving.mjs",
     "test:startup-ui": "tsx scripts/check-startup-ui.ts",
     "test:about": "tsx scripts/check-about-ui.ts",
+    "test:about-details": "tsx scripts/check-about-details-ui.ts",
     "build:pages": "node scripts/pages-build.mjs",
     "pages:prepare": "node scripts/pages-build.mjs --review",
+    "pages:acceptance": "node scripts/pages-build.mjs --acceptance-candidate",
     "test:pages": "tsx scripts/check-pages-ui.ts",
     "audit:release": "node scripts/audit-release.mjs"
   },

@@ -49,6 +49,7 @@ bun.lockb
 
 # Static hosting artifacts and local publication-review records.
 pages-dist/
+pages-acceptance-dist/
 pages-review/
 .wrangler/
 docs/FRONTEND_POLISH_REVIEW.md

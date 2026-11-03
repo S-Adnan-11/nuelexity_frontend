@@ -50,7 +50,7 @@ async function rejectSymlinks(dir) {
   }
 }
 export async function preparePages(source, destination) {
-  if (!["pages-review", "pages-dist"].includes(path.basename(destination))) throw new Error("Unexpected Pages output directory.");
+  if (!["pages-review", "pages-dist", "pages-acceptance-dist"].includes(path.basename(destination))) throw new Error("Unexpected Pages output directory.");
   const settings = JSON.parse(await readFile(path.join(source, "config.json"), "utf8"));
   const hashes = JSON.parse(await readFile(path.join(source, "csp-hashes.json"), "utf8"));
   const headers = pagesHeaders(settings, hashes);

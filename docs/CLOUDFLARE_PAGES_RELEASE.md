@@ -98,6 +98,8 @@ The Pages browser test intercepts fake config/auth/backend responses, rejects ev
 
 ## Short production acceptance checklist
 
+Before any live full-app test, follow the [restricted production acceptance procedure](PRODUCTION_ACCEPTANCE.md). Prepare an explicitly authorized candidate with `npm run pages:acceptance -- --live-test-authorized` while `productionAcceptanceComplete` stays false. Perform actual acceptance before recording it complete; opening the beta needs a separate owner launch decision. Candidate preparation does not upload or grant that decision.
+
 - [ ] Policy/Google gates pass for the exact revision; automatic production/preview deployments are disabled or the project is Direct Upload.
 - [ ] Custom-domain HTTPS, home/About/legal, manifest/fonts/icons/social image, sitemap/robots, canonical URLs, true missing-page/asset 404s and pages.dev noindex all behave as prepared.
 - [ ] Private account/auth/callback and a signed-in owned conversation deep link refresh correctly with noindex/no-store; no sensitive document is edge/browser cached.

@@ -1,9 +1,11 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { Globe } from "lucide-react";
 import { Link } from "react-router";
 import { BrandLogo, BrandMark } from "../Brand";
 import { Footer } from "../Footer";
 import { ProductDemo } from "../ProductDemo";
 import { ReturnCat } from "../ReturnCat";
+import { GitHubIcon } from "../GitHubIcon";
 import content from "../../../site-content.json";
 
 function publicLink(value: unknown, github = false) {
@@ -12,8 +14,8 @@ function publicLink(value: unknown, github = false) {
     return url.protocol === "https:" && !url.username && !url.password && (!github || url.hostname === "github.com") ? url.href : null;
   } catch { return null; }
 }
-export function PublicLayout({ children }: { children: ReactNode }) {
-  return <div className="document-page">
+export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  return <div className={`document-page${wide ? " about-page" : ""}`}>
     <a className="skip-link" href="#page-content">Skip to content</a>
     <header className="document-header"><Link to="/" aria-label="Nuelexity home"><BrandLogo /></Link>
       <nav aria-label="Main navigation"><Link to="/about">About</Link><Link className="quiet-button" to="/dashboard">Open workspace <span aria-hidden="true">↗</span></Link></nav>
@@ -21,9 +23,17 @@ export function PublicLayout({ children }: { children: ReactNode }) {
     <main id="page-content" tabIndex={-1}>{children}</main><Footer />
   </div>;
 }
+function DeveloperLink({ href, label, children }: { href: string; label: string; children: ReactNode }) {
+  const [dismissed, setDismissed] = useState(false);
+  return <a className="developer-link" href={href} target="_blank" rel="noopener noreferrer" aria-label={label}
+    data-label-dismissed={dismissed || undefined} onFocus={() => setDismissed(false)} onMouseEnter={() => setDismissed(false)}
+    onKeyDown={event => { if (event.key === "Escape") setDismissed(true); }}>
+    {children}<span className="developer-link-label" aria-hidden="true">{label}</span>
+  </a>;
+}
 export function About() {
   const github = publicLink(content.developer.github, true), portfolio = publicLink(content.developer.portfolio);
-  return <PublicLayout>
+  return <PublicLayout wide>
     <section className="about-hero">
       <div><p className="eyebrow">A PROJECT FOR CURIOUS MINDS</p><h1>A question is<br />a good beginning.</h1>
         <p className="document-lead">The web has plenty to say. Nuelexity explores how search can become a readable answer with sources you can inspect.</p>
@@ -33,7 +43,11 @@ export function About() {
     </section>
     <section className="document-section demo-section" aria-labelledby="demo-title"><p className="eyebrow">FROM QUESTION TO EVIDENCE</p><h2 id="demo-title">Start with a question. Follow what makes you curious.</h2>
       <p className="demo-intro">Explore an answer, check its sources and let what you learn shape the next question.</p>
-      <ProductDemo />
+      <div className="demo-story"><ProductDemo /><div className="demo-notes">
+        <h3>Ask a question</h3><p>Start with what you want to understand. The example begins with quantum computing.</p>
+        <h3>Inspect the sources</h3><p>Use the numbered references to open the original material and check the explanation.</p>
+        <h3>Continue with a follow-up</h3><p>Ask about one part of the answer. The conversation supplies context for the next question.</p>
+      </div></div>
     </section>
     <section className="document-section two-column"><div><p className="eyebrow">THE LEARNING BEHIND IT</p><h2>Making the pieces<br />work together.</h2></div><div>
       <p>Building Nuelexity meant learning how to give a model useful context: the question, relevant passages from the web and enough of the conversation to keep a follow-up on topic. That is the context engineering behind the answer.</p>
@@ -53,7 +67,7 @@ export function About() {
     </div></section>
     <section className="developer-card"><BrandMark size={44} /><div><p className="eyebrow">BEHIND THE PROJECT</p><h2>{content.developer.displayName || "An independent learning project"}</h2>
       <p>Built with curiosity, an appetite for learning and a desire to understand how things work.</p>
-      {(github || portfolio) && <nav aria-label="Developer links">{github && <a href={github} target="_blank" rel="noopener noreferrer">GitHub ↗</a>}{portfolio && <a href={portfolio} target="_blank" rel="noopener noreferrer">Portfolio ↗</a>}</nav>}
+      {(github || portfolio) && <nav aria-label="Developer links">{github && <DeveloperLink href={github} label="S. Adnan on GitHub (opens in a new tab)"><GitHubIcon /></DeveloperLink>}{portfolio && <DeveloperLink href={portfolio} label="S. Adnan’s website (opens in a new tab)"><Globe size={20} aria-hidden="true" focusable="false" /></DeveloperLink>}</nav>}
     </div></section>
   </PublicLayout>;
 }
