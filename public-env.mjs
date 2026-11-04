@@ -1,6 +1,7 @@
 // This whitelist is the only bridge from server settings into browser code.
-// env="inline" can spill secrets into a bundle. We no dey do that sha 😹.
-export function publicEnv(env: Record<string, string | undefined> = process.env) {
+// Keep secrets out of browser bundles, whatever package manager we use.
+/** @param {Record<string, string | undefined>} [env] */
+export function publicEnv(env = process.env) {
   const key = env.BUN_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
   let role = "";
   try {

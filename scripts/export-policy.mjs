@@ -1,0 +1,13 @@
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+const content = JSON.parse(await readFile("site-content.json", "utf8"));
+const dateNote = content.effectiveDate ? `Effective date: ${content.effectiveDate}.` : "The effective date is unset until actual first publication; no earlier date is claimed.";
+const input = "dist/legal/index.html", output = "docs/FINAL_POLICY.md";
+const html = await readFile(input, "utf8");
+const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1];
+if (!main || !['privacy','cookies','terms'].every(id => main.includes(`id="${id}"`))) throw new Error('Build the complete public review first.');
+const decode = value => value.replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#x27;|&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+const text = value => decode(value.replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, (_,href,label) => `[${label.replace(/<[^>]*>/g,'')}](${decode(href)})`).replace(/<[^>]*>/g,'').trim());
+const blocks = [...main.matchAll(/<(h[1-3]|p|li)\b[^>]*>([\s\S]*?)<\/\1>/g)].map(([,tag,body]) => `${tag.startsWith('h') ? '#'.repeat(Number(tag[1]))+' ' : tag==='li' ? '- ' : ''}${text(body)}`);
+await writeFile(output, '# Assembled public policy — full application\n\nExported from the rendered legal page. '+dateNote+'\n\n---\n\n'+blocks.join('\n\n')+'\n\n<!-- Rendered legal main SHA-256: '+createHash('sha256').update(main).digest('hex')+' -->\n');
+console.log('Full application policy exported. No publication or acceptance result was recorded.');

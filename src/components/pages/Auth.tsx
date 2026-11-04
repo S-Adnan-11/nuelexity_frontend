@@ -1,49 +1,59 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { ArrowLeft } from "lucide-react";
-import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "../AuthProvider";
-import { BrandLogo, BrandMark } from "../Brand";
+import { BrandMark } from "../Brand";
+import { ThemeToggle } from "../ThemeToggle";
+import { Footer } from "../Footer";
 import { OAuthButtons } from "../OAuthButtons";
+import { rememberSignInThread, takeSignInThread, threadPath, validThreadId } from "@/lib/thread-navigation";
 
 export default function Auth() {
   const { session, loading, error: sessionError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [error, setError] = useState<string | null>(null);
-  const callback = window.location.pathname === "/auth/callback";
+  const callback = location.pathname === "/auth/callback";
   useEffect(() => {
-    if (session) navigate("/dashboard", { replace: true });
-    const params = new URLSearchParams(window.location.search);
-    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const params = new URLSearchParams(location.search);
+    const hash = new URLSearchParams(location.hash.slice(1));
+    const requested = params.get("thread");
+    if (session) {
+      const stored = takeSignInThread();
+      const id = requested && validThreadId(requested) ? requested : callback ? stored : null;
+      let account = params.get("return") === "account";
+      try { account ||= callback && sessionStorage.getItem("nuelexity:sign-in-account") === "1"; sessionStorage.removeItem("nuelexity:sign-in-account"); } catch {}
+      navigate(id ? threadPath(id) : account ? "/account" : "/dashboard", { replace: true });
+      return;
+    }
+    if (!callback) {
+      rememberSignInThread(requested);
+      try { if (params.get("return") === "account") sessionStorage.setItem("nuelexity:sign-in-account", "1"); else sessionStorage.removeItem("nuelexity:sign-in-account"); } catch {}
+    }
     if (params.has("error") || hash.has("error")) {
+      rememberSignInThread(null);
       setError("Sign-in wasn't completed. Please try again.");
       window.history.replaceState(null, "", "/auth");
     }
-  }, [session, navigate]);
+  }, [session, navigate, callback, location.search, location.hash]);
   useEffect(() => {
     if (!callback || session || loading) return;
     const timer = setTimeout(() => setError("Sign-in couldn't finish. Please try again."), 10000);
     return () => clearTimeout(timer);
   }, [callback, session, loading]);
   return (
-    <main className="auth-page">
+    <main id="page-content" tabIndex={-1} className="auth-page">
+      <div className="auth-theme"><ThemeToggle /></div>
       <Link to="/dashboard" className="back-link">
         <ArrowLeft size={16} /> Back to search
       </Link>
       <div className="auth-card">
         <BrandMark size={120} />
-        {/* <div className="auth-logo"><BrandLogo /></div> */}
-        <h1>Curiosity killed the cat, <span style={{color:'#57CBB5'}}>nuelexity</span> brought it back!</h1>
+        <h1>Curiosity killed the cat, <span style={{color:'var(--nx-link)'}}>Nuelexity</span> brought it back!</h1>
         <p>Sign in to save your research and access more models.</p>
         {(error || sessionError) && (
           <p role="alert" className="error-notice">
             {error || sessionError}
-          </p>
-        )}
-        {!supabase && (
-          <p className="error-notice">
-            Sign-in setup is incomplete. Add the public Supabase URL and publishable key to the
-            frontend environment.
           </p>
         )}
         {loading || (callback && !error && !sessionError) ? (
@@ -57,9 +67,10 @@ export default function Auth() {
           </>
         )}
         <small>
-          A little curiousity goes a looong wayy..
+          A little curiosity goes a long way.
         </small>
       </div>
+      <Footer />
     </main>
   );
 }

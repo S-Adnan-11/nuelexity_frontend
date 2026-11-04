@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { answerModelLabel } from "../src/lib/models";
 import { readSearchEvents } from "../src/lib/stream";
 import type { Message } from "../src/lib/types";
@@ -12,12 +12,14 @@ test("older messages remain unknown and partial answers do not claim a model", (
   expect(answerModelLabel({ ...message, answerKind: "no-sources" })).toContain("No model used");
   expect(answerModelLabel({ ...message, answerKind: "sources-only" })).toContain("No model used");
 });
-test("saved answer labels use immutable per-message metadata including Preview and serving provider", () => {
+test("saved answer labels use immutable per-message metadata including Preview without a visible provider suffix", () => {
   const first = { ...message, model: qwen, answerKind: "ai" as const };
   const second = { ...message, model: { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", provider: "Groq" as const, preview: false } };
-  expect(answerModelLabel(first)).toBe("Qwen 3.8 27B · Preview · Served by Groq");
-  expect(answerModelLabel(second)).toBe("GPT-OSS 120B · Served by Groq");
+  expect(answerModelLabel(first)).toBe("Qwen 3.8 27B · Preview");
+  expect(answerModelLabel(second)).toBe("GPT-OSS 120B");
   expect(answerModelLabel(first)).toContain("Qwen");
+  expect(answerModelLabel(first)).not.toContain("Groq");
+  expect(first.model.provider).toBe("Groq");
 });
 async function completion(fields: Record<string, unknown>) {
   const bytes = new TextEncoder().encode(`event: done\ndata: ${JSON.stringify({ conversationId: "thread", ...fields })}\n\n`);

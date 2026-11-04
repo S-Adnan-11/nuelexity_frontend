@@ -1,5 +1,5 @@
 node_modules/
 dist/
-bun.lock
+package-lock.json
 .env*
 *.har

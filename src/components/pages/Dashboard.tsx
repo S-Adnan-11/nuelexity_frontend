@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -8,7 +8,6 @@ import {
   Check,
   Copy,
   Globe,
-  LogOut,
   Menu,
   Plus,
   Search,
@@ -21,17 +20,24 @@ import {
   deleteConversation,
   getConversation,
   getModels,
-  listConversations,
   search,
   setConversationModel,
+  backendStartup,
 } from "@/lib/api";
+import { useBackendStartup } from "@/lib/useBackendStartup";
 import { TURNSTILE_SITE_KEY } from "@/lib/config";
 import { useGuestSession } from "@/lib/useGuestSession";
-import { supabase } from "@/lib/supabase/client";
-import type { Conversation, Message, ModelCatalogue } from "@/lib/types";
+import { useConversationLibrary } from "@/lib/useConversationLibrary";
+import { validThreadId, threadPath } from "@/lib/thread-navigation";
+import { accountProfile } from "../../lib/profile";
+import { Avatar } from "../Avatar";
+import { ThemeToggle } from "../ThemeToggle";
+import { Footer } from "../Footer";
+import type { Message, ModelCatalogue } from "@/lib/types";
 import { answerModelLabel } from "@/lib/models";
 import { useAuth } from "../AuthProvider";
-import { Answer, safeSourceUrl } from "../Answer";
+import { Answer } from "../Answer";
+import { SourceCards } from "../SourceCards";
 import { Turnstile } from "../Turnstile";
 import { ModelSelector } from "../ModelSelector";
 import { BrandLogo, BrandMark, ThreadSkeleton, WorkspaceSkeleton } from "../Brand";
@@ -43,8 +49,17 @@ const suggestions = [
   "Help me understand quantum computing",
 ];
 export default function Dashboard() {
-  const { session, loading } = useAuth();
-  if (loading) return <WorkspaceSkeleton />;
+  const { session, loading, signingOut } = useAuth();
+  const navigate = useNavigate();
+  const previousIdentity = useRef<string | null | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (loading) return;
+    const identity = session?.user.id ?? null;
+    if (previousIdentity.current !== undefined && previousIdentity.current !== identity)
+      navigate("/dashboard", { replace: true });
+    previousIdentity.current = identity;
+  }, [session?.user.id, loading, navigate]);
+  if (loading || signingOut) return <WorkspaceSkeleton />;
   // A new identity gets a fresh workspace. Token renewal keeps the same one.
   return <Workspace key={session?.user.id ?? "guest"} />;
 }
@@ -52,20 +67,26 @@ export default function Dashboard() {
 function Workspace() {
   const { session, loading, error: authError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { conversationId: routeThreadId } = useParams();
   const token = session?.access_token,
     userId = session?.user.id;
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const startup = useBackendStartup();
+  const library = useConversationLibrary(token);
+  const { conversations, status: historyStatus, error: historyError, refresh: refreshHistory } = library;
+  const initialRoute = useRef(true);
+  const routeKey = useRef<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false),
     [loadingThread, setLoadingThread] = useState(false);
+  const [waitingQuestion, setWaitingQuestion] = useState<string | null>(null);
+  const pendingQuestion = useRef<string | null>(null);
   const [stage, setStage] = useState(""),
     [error, setError] = useState<string | null>(null);
-  const [historyStatus, setHistoryStatus] = useState<"loading" | "refreshing" | "ready" | "failed">("loading");
   const [threadStatus, setThreadStatus] = useState<"idle" | "loading" | "refreshing" | "ready" | "failed">("idle");
   const [threadError, setThreadError] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -80,7 +101,6 @@ function Workspace() {
   const guest = useGuestSession(!token && !loading);
   const controllerRef = useRef<AbortController | null>(null);
   const historyController = useRef<AbortController | null>(null);
-  const listController = useRef<AbortController | null>(null);
   const modelsController = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const conversationRef = useRef<string | null>(null);
@@ -90,9 +110,11 @@ function Workspace() {
   const scrollPositions = useRef(new Map<string, number>());
   const pendingScroll = useRef<number | null>(null);
   const nearBottom = useRef(false);
+  const wasStreaming = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectedRef = useRef<string | null>(null);
   const modelWrites = useRef(Promise.resolve());
+  const mutations = useRef(new AbortController());
   const modelEpoch = useRef(0);
   const modelRevision = useRef(0);
   const activeKey = userId ? `nuelexity:active-thread:${userId}` : null;
@@ -100,6 +122,7 @@ function Workspace() {
   selectedRef.current = effectiveModelId;
   const modelReady = threadStatus !== "failed" && !!catalogue && !modelsLoading && !modelsError && !modelSaving && !modelSaveError &&
     (catalogue.answerMode === "sources-only" || !!catalogue.models.find((model) => model.id === effectiveModelId && model.available));
+  const modelBlocked = startup === "ready" && !modelsLoading && !modelReady;
 
   const refreshModels = useCallback(async (signal?: AbortSignal) => {
     modelsController.current?.abort();
@@ -137,7 +160,7 @@ function Workspace() {
     // Serialize quick changes: an older network response cannot become the saved choice.
     modelWrites.current = modelWrites.current.catch(() => {}).then(async () => {
       if (epoch !== modelEpoch.current) return;
-      await setConversationModel(id, modelId, token);
+      await setConversationModel(id, modelId, token, mutations.current.signal);
     }).catch((failure) => {
       if (epoch === modelEpoch.current && revision === modelRevision.current)
         setModelSaveError(`Your choice was not saved. Choose a model again to retry. ${(failure as Error).message}`);
@@ -146,52 +169,51 @@ function Workspace() {
     });
   }
   function chooseModel(modelId: string) {
+    if (!token || !catalogue?.canSelect || !catalogue.models.some(model => model.id === modelId && model.available)) return;
     setSelectedModelId(modelId);
     selectedRef.current = modelId;
     setModelSaveError(null);
     if (conversationId) persistModel(conversationId, modelId);
   }
 
-  const refreshHistory = useCallback(async (signal?: AbortSignal) => {
-    if (!token) { setHistoryStatus("ready"); return; }
-    listController.current?.abort();
-    const controller = new AbortController();
-    listController.current = controller;
-    signal?.addEventListener("abort", () => controller.abort(), { once: true });
-    setHistoryStatus((current) => current === "ready" || current === "refreshing" ? "refreshing" : "loading");
-    setHistoryError(null);
-    try {
-      const result = await listConversations(token, controller.signal);
-      if (controller.signal.aborted || !mounted.current || listController.current !== controller) return;
-      setConversations(result);
-      setHistoryStatus("ready");
-    } catch (error) {
-      if (controller.signal.aborted || !mounted.current) return;
-      setHistoryError((error as Error).message);
-      setHistoryStatus("failed");
-    }
-  }, [token]);
-  useEffect(() => {
-    const controller = new AbortController();
-    void refreshHistory(controller.signal);
-    return () => controller.abort();
-  }, [refreshHistory]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     mounted.current = true;
-    if (userId) {
-      try {
-        const saved = sessionStorage.getItem(`nuelexity:active-thread:${userId}`);
-        if (saved) void openThread(saved);
-      } catch { /* The library remains available without browser storage. */ }
+    if (mutations.current.signal.aborted) mutations.current = new AbortController();
+    const changed = routeKey.current !== location.key;
+    routeKey.current = location.key;
+    if (initialRoute.current) {
+      initialRoute.current = false;
+      // Upgrade the old per-tab pointer once. After that, the URL owns navigation.
+      if (!routeThreadId && userId) {
+        try {
+          const saved = sessionStorage.getItem(`nuelexity:active-thread:${userId}`);
+          if (saved && validThreadId(saved)) { navigate(threadPath(saved), { replace: true }); return; }
+        } catch { /* Direct URLs and the library work without browser storage. */ }
+      }
     }
-  }, []);
+    if (!routeThreadId) {
+      if (changed) resetWorkspace();
+      return;
+    }
+    if (!token || !validThreadId(routeThreadId)) {
+      resetWorkspace();
+      setThreadStatus("failed");
+      setThreadError(!token ? "Sign in to open a saved conversation." : "This conversation URL is invalid.");
+      return;
+    }
+    // The meta event attaches a URL to the answer already streaming in this workspace.
+    if (conversationRef.current === routeThreadId && controllerRef.current &&
+        (pendingQuestion.current === null || !changed)) return;
+    void openThread(routeThreadId);
+  }, [location.key, token]);
   useEffect(
     () => () => {
       mounted.current = false;
+      mutations.current.abort();
       modelEpoch.current++;
       controllerRef.current?.abort();
       controllerRef.current = null;
-      listController.current?.abort();
+      pendingQuestion.current = null;
       modelsController.current?.abort();
       historyController.current?.abort();
     },
@@ -222,13 +244,17 @@ function Workspace() {
     return () => { document.removeEventListener("keydown", keydown); previous?.focus(); };
   }, [mobileOpen, narrow]);
 
-  function newSearch() {
+  function resetWorkspace() {
+    saveScroll();
     controllerRef.current?.abort();
     controllerRef.current = null;
+    pendingQuestion.current = null;
+    setWaitingQuestion(null);
     historyController.current?.abort();
     historyController.current = null;
     setMessages([]);
     setConversationId(null);
+    pendingScroll.current = null;
     conversationRef.current = null;
     setThreadStatus("idle");
     setThreadError(null);
@@ -245,6 +271,11 @@ function Workspace() {
     rememberThread(null);
     inputRef.current?.focus();
   }
+  function newSearch() {
+    const leaveThread = !!conversationRef.current || !!routeThreadId;
+    resetWorkspace();
+    if (leaveThread) navigate("/dashboard");
+  }
   function saveScroll() {
     const id = conversationRef.current;
     if (!id || !userId || !scrollRef.current || !messageRef.current.length || pendingScroll.current !== null) return;
@@ -253,9 +284,15 @@ function Workspace() {
     try { sessionStorage.setItem(`nuelexity:scroll:${userId}:${id}`, String(top)); } catch {}
   }
   async function openThread(id: string) {
-    if (!token || busy) return;
+    if (!token) return;
     const same = conversationRef.current === id;
     saveScroll();
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    pendingQuestion.current = null;
+    setWaitingQuestion(null);
+    setBusy(false);
+    setStage("");
     historyController.current?.abort();
     const controller = new AbortController();
     historyController.current = controller;
@@ -270,7 +307,7 @@ function Workspace() {
     conversationRef.current = id;
     setConversationId(id);
     rememberThread(id);
-    if (!same) { setMessages([]); setSelectedModelId(null); }
+    if (!same) { pendingScroll.current = null; setMessages([]); setSelectedModelId(null); setQuery(""); }
     try {
       const detail = await getConversation(id, token, controller.signal);
       if (controller.signal.aborted || !mounted.current || historyController.current !== controller) return;
@@ -294,18 +331,42 @@ function Workspace() {
       }
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scroll = scrollRef.current;
     if (!scroll) return;
     if (pendingScroll.current !== null) { scroll.scrollTop = pendingScroll.current; pendingScroll.current = null; }
-    else if (busy && nearBottom.current) scroll.scrollTop = scroll.scrollHeight;
+    else if (nearBottom.current && (busy || wasStreaming.current)) scroll.scrollTop = scroll.scrollHeight;
+    wasStreaming.current = busy;
   }, [messages, busy]);
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    // Native scrollbars consume width on some systems and overlay on others.
+    // Match that actual gutter so the fixed composer shares the reading axis.
+    const sync = () => scroll.closest<HTMLElement>(".research-main")?.style.setProperty(
+      "--conversation-gutter", `${scroll.offsetWidth - scroll.clientWidth}px`);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, []);
+  function resizeComposer() {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "0px";
+    const maximum = Math.max(64, Math.min(180, (window.visualViewport?.height ?? window.innerHeight) * .28));
+    const height = Math.max(40, Math.min(input.scrollHeight, maximum));
+    input.style.height = `${height}px`;
+    input.style.overflowY = input.scrollHeight > height ? "auto" : "hidden";
+  }
+  useLayoutEffect(resizeComposer, [query]);
   useEffect(() => {
     const viewport = window.visualViewport;
     function resize() {
       const height = viewport?.height ?? window.innerHeight;
       document.documentElement.style.setProperty("--workspace-height", `${height}px`);
       document.documentElement.dataset.compactViewport = String(height < 650);
+      resizeComposer();
     }
     resize();
     viewport?.addEventListener("resize", resize);
@@ -318,32 +379,59 @@ function Workspace() {
   async function removeThread(id: string) {
     if (!token || busy || !window.confirm("Delete this conversation and its messages?")) return;
     try {
-      await deleteConversation(id, token);
+      await deleteConversation(id, token, mutations.current.signal);
       if (!mounted.current) return;
-      if (conversationId === id) newSearch();
+      if (conversationRef.current === id) newSearch();
       await refreshHistory();
     } catch (error) {
+      if (!mounted.current) return;
       setError((error as Error).message);
     }
   }
-  async function submit(value = query) {
+  function submit(value = query) {
     const question = value.trim();
-    if (!question || question.length > 1000 || busy || loadingThread || loading) return;
-    if (!modelReady) {
-      setError("Select an available model and save your choice before sending. If models could not load, refresh them.");
-      return;
-    }
-    if (!token && (!guest.ready || guest.checking || guest.verifying)) {
-      setError("Complete the verification before searching.");
+    if (!question || question.length > 1000 || busy || controllerRef.current || loadingThread || loading) return;
+    if (threadStatus === "failed" || modelSaving || modelSaveError || modelBlocked) {
+      setError("Open a conversation and save your model choice before sending.");
       return;
     }
     const controller = new AbortController();
-    const requestModelId = effectiveModelId; // Frozen for this request, even if the selector changes.
     controllerRef.current = controller;
+    pendingQuestion.current = question;
+    setQuery(question);
+    setWaitingQuestion(question);
     setBusy(true);
     setError(null);
+  }
+  function stopSearch() {
+    controllerRef.current?.abort();
+    if (pendingQuestion.current !== null) {
+      controllerRef.current = null;
+      pendingQuestion.current = null;
+      setWaitingQuestion(null);
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (!waitingQuestion || pendingQuestion.current === null) return;
+    if (["configuration", "unavailable", "unreachable"].includes(startup) || modelBlocked) {
+      stopSearch();
+      setError(startup === "configuration" ? "The service needs configuration from its owner. Your question has been kept."
+        : startup === "unreachable" ? "The service could not be reached. It may be starting, suspended or offline. Your question has been kept."
+        : "The service could not become ready for search. Your question has been kept. Try again later.");
+      return;
+    }
+    if (startup !== "ready" || !modelReady || (!token && (!guest.ready || guest.checking || guest.verifying))) return;
+    const question = pendingQuestion.current, controller = controllerRef.current;
+    pendingQuestion.current = null; // Synchronous fence before any asynchronous search work.
+    setWaitingQuestion(null);
+    if (controller && !controller.signal.aborted) void runSearch(question, controller);
+  }, [waitingQuestion, startup, modelReady, modelBlocked, modelsError, token, guest.ready, guest.checking, guest.verifying]);
+
+  async function runSearch(question: string, controller: AbortController) {
+    const requestModelId = effectiveModelId;
     setQuery("");
-    setStage("Preparing your search");
+    setStage("Researching");
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -368,6 +456,7 @@ function Workspace() {
           .map((m) => ({ role: m.role, content: m.content.slice(0, 1000) }))
       : undefined;
     nearBottom.current = true;
+    let requestFollowUps: string[] = [];
     setMessages((previous) => [...previous, userMessage, assistantMessage]);
     const update = (change: Partial<Message> | ((message: Message) => Partial<Message>)) =>
       setMessages((previous) =>
@@ -394,6 +483,8 @@ function Workspace() {
               setConversationId(event.data.conversationId);
               conversationRef.current = event.data.conversationId;
               rememberThread(event.data.conversationId);
+              if (token && event.data.conversationId && location.pathname !== threadPath(event.data.conversationId))
+                navigate(threadPath(event.data.conversationId));
               if (token && event.data.conversationId && selectedRef.current && selectedRef.current !== requestModelId)
                 persistModel(event.data.conversationId, selectedRef.current);
               setRemaining(event.data.remaining);
@@ -410,10 +501,10 @@ function Workspace() {
               update((m) => ({ content: m.content + event.data.text }));
               break;
             case "follow_ups":
-              update({ followUps: event.data.questions });
+              requestFollowUps = event.data.questions;
               break;
             case "done":
-              update({ status: "complete", model: event.data.model ?? null, answerKind: event.data.answerKind ?? null });
+              update({ status: "complete", followUps: requestFollowUps, model: event.data.model ?? null, answerKind: event.data.answerKind ?? null });
               break;
           }
         },
@@ -448,15 +539,6 @@ function Workspace() {
     event.preventDefault();
     void submit();
   }
-  async function signOut() {
-    controllerRef.current?.abort();
-    const result = await supabase?.auth.signOut();
-    if (result?.error) {
-      setError("Sign-out failed. Please try again.");
-      return;
-    }
-    navigate("/dashboard");
-  }
   async function copy(message: Message) {
     try {
       await navigator.clipboard.writeText(message.content);
@@ -468,10 +550,13 @@ function Workspace() {
 
   return (
     <div className="research-app">
+      <a className="skip-link" href="#workspace-main">Skip to research</a>
       <button
         className="mobile-menu icon-button"
         onClick={() => setMobileOpen(true)}
         aria-label="Open navigation"
+        aria-expanded={mobileOpen}
+        aria-controls="workspace-navigation"
       >
         <Menu size={21} />
       </button>
@@ -482,8 +567,8 @@ function Workspace() {
           onClick={() => setMobileOpen(false)}
         />
       )}
-      <aside ref={sidebarRef} inert={narrow && !mobileOpen} className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
-        <Link className="brand" to="/dashboard" onClick={newSearch}>
+      <aside id="workspace-navigation" ref={sidebarRef} inert={narrow && !mobileOpen} className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
+        <Link className="brand" to="/dashboard">
           <BrandLogo />
         </Link>
         <button
@@ -497,7 +582,7 @@ function Workspace() {
           <Plus size={18} /> New search <kbd>↗</kbd>
         </button>
         <div className="sidebar-heading">
-          <BookOpen size={15} /> Your library
+          <BookOpen size={15} /> Your Research library
         </div>
         <nav aria-label="Saved conversations" className="thread-list">
           {historyError && (
@@ -526,14 +611,13 @@ function Workspace() {
               className={`thread-row ${conversationId === conversation.id ? "selected" : ""}`}
               key={conversation.id}
             >
-              <button
+              <Link
+                to={threadPath(conversation.id)}
                 aria-current={conversationId === conversation.id ? "page" : undefined}
-                disabled={busy}
-                onClick={() => void openThread(conversation.id)}
                 title={conversation.title}
               >
                 {conversation.title}
-              </button>
+              </Link>
               <button
                 disabled={busy}
                 className="delete-thread icon-button"
@@ -544,35 +628,29 @@ function Workspace() {
               </button>
             </div>
           ))}
+          {token && library.hasMore && <div className="library-pagination">
+            {library.moreError && <p role="status" className="sidebar-note">{library.moreError}</p>}
+            <button className="text-button" disabled={library.loadingMore || historyStatus !== "ready"}
+              onClick={() => void library.loadMore()}>
+              {library.loadingMore ? "Loading older conversations…" : library.moreError ? "Retry older conversations" : "Load older conversations"}
+            </button>
+          </div>}
         </nav>
         <div className="sidebar-footer">
-          <span className="small-orbit" aria-hidden="true">
-            <BrandMark />
-          </span>
-          {session ? (
-            <>
-              <span className="account-label">
-                {session.user.user_metadata.full_name || session.user.email || "Your account"}
-              </span>
-              <button className="icon-button" aria-label="Sign out" onClick={() => void signOut()}>
-                <LogOut size={17} />
-              </button>
-            </>
-          ) : (
-            <Link to="/auth">
-              Sign in <ArrowUpRight size={16} />
-            </Link>
-          )}
+          {session ? <Link className="sidebar-account" to="/account" aria-label="Open your account">
+            <Avatar user={session.user} /><span className="account-label">{accountProfile(session.user).name || "Your account"}</span><ArrowUpRight size={16} />
+          </Link> : <><BrandMark /><Link to="/auth">Sign in <ArrowUpRight size={16} /></Link></>}
+
         </div>
       </aside>
 
-      <main className="research-main">
+      <main id="workspace-main" tabIndex={-1} className="research-main" inert={narrow && mobileOpen}>
         <header className="topbar">
-          <Link className="mobile-brand" to="/dashboard" onClick={newSearch}><BrandMark decorative={false} size={28} /></Link>
+          <Link className="mobile-brand" to="/dashboard"><BrandMark decorative={false} size={28} /></Link>
           <span>
             <Globe size={14} /> Search the web
           </span>
-          <span className="plan-label">{session ? "Personal workspace" : "Guest workspace"}</span>
+          <div className="workspace-tools">{session ? <Link className="plan-label workspace-account" to="/account" aria-label="Open your account"><Avatar user={session.user} size={26} /><span>Personal workspace</span></Link> : <span className="plan-label">Guest workspace</span>}<ThemeToggle /></div>
         </header>
         <div className={`research-content ${(messages.length || threadStatus !== "idle") ? "has-messages" : ""}`}>
           <div className="conversation-scroll" ref={scrollRef} onScroll={() => {
@@ -580,6 +658,7 @@ function Workspace() {
             if (scroll) nearBottom.current = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 100;
             saveScroll();
           }}>
+          <div className="reading-column">
           {!messages.length && threadStatus === "idle" && (
             <section className="welcome">
               <p className="eyebrow">FOR THE CURIOUS MINDS</p>
@@ -596,7 +675,11 @@ function Workspace() {
           {threadStatus === "loading" && <ThreadSkeleton />}
           {threadStatus === "refreshing" && <p className="quota-note" role="status">Refreshing conversation…</p>}
           {threadStatus === "ready" && !messages.length && <p className="empty-thread">This conversation has no messages yet. Ask your first question below.</p>}
-          {threadError && <div role="alert" className="error-notice">{threadError}<button className="text-button" onClick={() => conversationId && void openThread(conversationId)}>Retry conversation</button></div>}
+          {threadError && <div role="alert" className="error-notice">{threadError}
+            {token && routeThreadId && validThreadId(routeThreadId) && <button className="text-button" onClick={() => void openThread(routeThreadId)}>Retry conversation</button>}
+            {!token && <Link className="text-button" to={routeThreadId && validThreadId(routeThreadId) ? `/auth?thread=${routeThreadId}` : "/auth"}>Sign in</Link>}
+            <button className="text-button" onClick={newSearch}>Start a new search</button>
+          </div>}
           {!!messages.length && (
             <section className="messages" aria-label="Research conversation">
               {messages.map((message) => (
@@ -615,30 +698,7 @@ function Workspace() {
                         )}
                       </div>
                       {answerModelLabel(message) && <p className="answer-model">{answerModelLabel(message)}</p>}
-                      {!!message.sources.length && (
-                        <div className="source-grid" aria-label="Sources">
-                          {message.sources.map((source) => {
-                            const url = safeSourceUrl(source.url);
-                            if (!url) return null;
-                            return (
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="source-card"
-                                key={source.id}
-                              >
-                                <span className="source-domain">
-                                  <span>{source.id}</span>
-                                  {new URL(url).hostname.replace(/^www\./, "")}
-                                </span>
-                                <strong>{source.title}</strong>
-                                <ArrowUpRight size={13} />
-                              </a>
-                            );
-                          })}
-                        </div>
-                      )}
+                      {!!message.sources.length && <SourceCards sources={message.sources} />}
                       <Answer content={message.content} sources={message.sources} />
                       {message.status === "streaming" && (
                         <p className="stream-status" role="status">
@@ -655,7 +715,7 @@ function Workspace() {
                           {copied === message.id ? <Check size={16} /> : <Copy size={16} />}
                         </button>
                       )}
-                      {!!message.followUps.length && (
+                      {message.status === "complete" && !!message.followUps.length && (
                         <div className="follow-ups">
                           <p>Keep exploring</p>
                           {message.followUps.map((question) => (
@@ -682,7 +742,8 @@ function Workspace() {
             </div>
           )}
           </div>
-          <div className="composer-dock">
+          </div>
+          <div className="composer-dock"><div className="reading-column">
           <form className="composer" onSubmit={onSubmit}>
             <label htmlFor="question" className="sr-only">
               {messages.length ? "Ask a follow-up question" : "Ask anything"}
@@ -694,8 +755,9 @@ function Workspace() {
               onChange={(event) => setQuery(event.target.value)}
               placeholder={messages.length ? "Ask a follow-up…" : "Ask anything…"}
               maxLength={1000}
-              rows={2}
+              rows={1}
               disabled={loadingThread}
+              readOnly={waitingQuestion !== null}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
@@ -703,6 +765,8 @@ function Workspace() {
                 }
               }}
             />
+            <div className="composer-toolbar">
+              <span className="search-indicator" title="Search the web with numbered sources"><Globe size={15} /> Web <span className="source-indicator">· Sources</span></span>
             <ModelSelector catalogue={catalogue} selectedId={effectiveModelId} signedIn={!!token}
               loading={modelsLoading} saving={modelSaving} error={modelsError || modelSaveError}
               disabled={loading || loadingThread}
@@ -711,16 +775,12 @@ function Workspace() {
                 if (modelSaveError && conversationId && effectiveModelId) persistModel(conversationId, effectiveModelId);
                 else void refreshModels();
               }} />
-            <div className="composer-toolbar">
-              <span>
-                <Globe size={15} /> Web <span className="composer-divider" /> Sources included
-              </span>
               {busy ? (
                 <button
                   type="button"
                   className="send-button"
-                  onClick={() => controllerRef.current?.abort()}
-                  aria-label="Stop search"
+                  onClick={stopSearch}
+                  aria-label={waitingQuestion ? "Cancel waiting question" : "Stop search"}
                 >
                   <Square size={15} />
                 </button>
@@ -731,8 +791,7 @@ function Workspace() {
                     !query.trim() ||
                     loading ||
                     loadingThread ||
-                    !modelReady ||
-                    (!token && (!guest.ready || guest.checking || guest.verifying))
+                    threadStatus === "failed" || modelSaving || !!modelSaveError || modelBlocked
                   }
                   aria-label="Send question"
                 >
@@ -741,6 +800,18 @@ function Workspace() {
               )}
             </div>
           </form>
+          {startup !== "ready" && startup !== "starting" && <p role="status" className="quota-note">
+            {startup === "configuration" ? "The service needs configuration from its owner."
+              : startup === "unavailable" ? "Our service is running but not ready for research. Try again later."
+              : "Our service is currently unreachable. It may be starting, suspended or offline."}
+            <button type="button" className="text-button" onClick={() => {
+              backendStartup.reset();
+              void refreshModels();
+              if (!token) guest.recheck();
+              else void refreshHistory();
+            }}>Retry</button>
+          </p>}
+          {waitingQuestion && <p role="status" className="quota-note">Awaiting {startup !== "ready" ? "our service" : !modelReady ? "model availability" : "verification"}. Cancel to edit it.</p>}
           {!token &&
             !loading &&
             !guest.ready &&
@@ -749,11 +820,7 @@ function Workspace() {
             TURNSTILE_SITE_KEY && (
               <Turnstile onToken={guest.verify} onError={guest.onError} resetKey={guest.resetKey} />
             )}
-          {!token && !loading && (guest.checking || guest.verifying) && (
-            <p role="status" className="quota-note">
-              Checking guest verification…
-            </p>
-          )}
+          {!token && !loading && (guest.checking || guest.verifying) && <p role="status" className="sr-only">Checking guest verification…</p>}
           {!token && guest.error && (
             <p role="alert" className="error-notice">
               {guest.error}{" "}
@@ -770,23 +837,21 @@ function Workspace() {
             !TURNSTILE_SITE_KEY && (
               <p className="error-notice">Guest search is unavailable. Please sign in.</p>
             )}
-          <p className="quota-note">
+          {(remaining !== null || !token) && <p className="quota-note">
             {remaining !== null
               ? `${remaining} searches left in your daily allowance.`
-              : !token
-                ? "Try it as a guest. Sign in to save your research."
-                : "Your research is saved to your account."}{" "}
-            {!token && <Link to="/auth">Sign in</Link>}
-          </p>
-          </div>
+              : "Guest research is temporary."}{" "}
+            {!token && <Link to="/auth">Sign in to save research</Link>}
+          </p>}
+          </div></div>
           {!messages.length && threadStatus === "idle" && (
-            <div className="suggestion-list">
+            <div className="suggestion-list reading-column">
               {suggestions.map((question) => (
                 <button
                   disabled={
                     busy ||
                     loading ||
-                    (!token && (!guest.ready || guest.checking || guest.verifying))
+                    loadingThread
                   }
                   key={question}
                   onClick={() => {
@@ -803,9 +868,7 @@ function Workspace() {
           )}
         </div>
         {!session && <GuestInvitation />}
-        <footer className="page-footer">
-          Stay curious. Check the sources.<span>Answers can be imperfect.</span>
-        </footer>
+        <Footer compact />
       </main>
     </div>
   );

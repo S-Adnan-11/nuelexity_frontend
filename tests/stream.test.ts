@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { readSearchEvents } from "../src/lib/stream";
-import { publicEnv } from "../public-env";
+import { publicEnv } from "../public-env.mjs";
 import { safeSourceUrl } from "../src/components/Answer";
 
 function stream(text: string, size = 1) {

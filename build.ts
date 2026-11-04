@@ -1,29 +1,57 @@
-import tailwind from "bun-plugin-tailwind";
-import { cp, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { publicEnv } from "./public-env";
+import { build } from "vite";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StaticRouter } from "react-router";
+import { About, Legal, NotFound, PublicHome, PublicInformation, Unavailable } from "./src/components/pages/PublicPages";
+import { canonicalOrigin, routeMetadata } from "./src/lib/seo";
+import { publicEnv } from "./public-env.mjs";
+import content from "./site-content.json";
 
-const outdir = path.join(process.cwd(), "dist");
-const settings = publicEnv();
-await rm(outdir, { recursive: true, force: true });
-const result = await Bun.build({
-  entrypoints: ["src/index.html"],
-  outdir,
-  plugins: [tailwind],
-  minify: true,
-  target: "browser",
-  publicPath: "/",
-  define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
-  },
-});
-if (!result.success) {
-  for (const log of result.logs) console.error(log);
-  process.exit(1);
+const limited = process.argv.includes("--public-info");
+const output = limited ? "public-build" : "dist";
+await build(limited ? { plugins: [{ name: "public-information-boundary", generateBundle() {
+  for (const id of this.getModuleIds()) if (/@supabase\/|\/(?:PrivateApp|AuthProvider|OAuthButtons|Turnstile)\.tsx$|\/lib\/(?:api|startup|config|useGuestSession)\.ts$|\/pages\/(?:Dashboard|Account|Auth)\.tsx$/.test(id)) throw new Error("Private integration imported into the limited public bundle.");
+} }], build: { outDir: "../public-build", rollupOptions: { input: "src/public-information.html" } } } : {});
+await writeFile(`${output}/release-mode.json`, JSON.stringify({ mode: limited ? "public-information" : "application" }));
+if (!limited) await writeFile(`${output}/config.json`, JSON.stringify(publicEnv(), null, 2) + "\n");
+const template = await readFile(`${output}/${limited ? "public-information.html" : "index.html"}`, "utf8");
+const escape = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+const scripts: string[] = [];
+function document(path: string, body: string) {
+  const meta = routeMetadata(path);
+  let html = template.replace(/<title>[^<]*<\/title>/, `<title>${escape(meta.title)}</title>`)
+    .replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/>/, `<meta name="description" content="${escape(meta.description)}" />`)
+    .replace(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${escape(meta.title)}" />`)
+    .replace(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${escape(meta.description)}" />`)
+    .replace(/<link rel="canonical"[^>]*>/, meta.canonical ? `<link rel="canonical" href="${canonicalOrigin}${meta.canonical}" />` : '')
+    .replace(/<meta property="og:url"[^>]*>/, meta.canonical ? `<meta property="og:url" content="${canonicalOrigin}${meta.canonical}" />` : '')
+    .replace('<head>', `<head>\n<meta name="robots" content="${meta.index ? 'index,follow' : 'noindex,nofollow'}" />`)
+    .replace(/<div id="root">[\s\S]*<\/div>\s*<\/body>/, `<div id="root">${body}</div>\n</body>`);
+  if (path === '/' || path === '/about') {
+    const data = JSON.stringify({ '@context': 'https://schema.org', '@type': path === '/' ? 'WebSite' : 'AboutPage', name: 'Nuelexity', url: canonicalOrigin + path, description: meta.description }).replaceAll('<', '\\u003c');
+    scripts.push(`'sha256-${createHash('sha256').update(data).digest('base64')}'`);
+    html = html.replace('</head>', `<script type="application/ld+json">${data}</script></head>`);
+  }
+  if (content.searchConsoleVerification && /^[a-zA-Z0-9_-]+$/.test(content.searchConsoleVerification)) html = html.replace('</head>', `<meta name="google-site-verification" content="${content.searchConsoleVerification}" /></head>`);
+  return html;
 }
-await writeFile(path.join(outdir, "config.json"), JSON.stringify(settings, null, 2) + "\n");
-await cp("public", outdir, { recursive: true });
-for (const output of result.outputs)
-  console.log(
-    `${path.relative(process.cwd(), output.path)}  ${(output.size / 1024).toFixed(1)} KB`,
-  );
+for (const [route, Component] of [['/', PublicHome], ['/about', About], ['/legal', Legal], ['/404', NotFound]] as const) {
+  const html = document(route, renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: limited }, createElement(Component)))));
+  const file = route === '/' ? `${output}/index.html` : route === '/404' ? `${output}/404.html` : `${output}${route}/index.html`;
+  await mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
+  await writeFile(file, html);
+}
+for (const route of ['/account', '/auth', '/auth/callback', '/dashboard']) {
+  await mkdir(`${output}${route}`, { recursive: true });
+  await writeFile(`${output}${route}/index.html`, document(route, limited ? renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening Nuelexity…</main>'));
+}
+await writeFile(`${output}/private.html`, document('/dashboard', limited ? renderToStaticMarkup(createElement(StaticRouter, { location: '/dashboard' }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening your workspace…</main>'));
+await writeFile(`${output}/sitemap.xml`, `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/about', '/legal'].map(route => `<url><loc>${canonicalOrigin}${route}</loc></url>`).join('')}</urlset>\n`);
+// Let crawlers see private routes' noindex. Robots exclusions cannot protect data.
+await writeFile(`${output}/robots.txt`, `User-agent: *\nAllow: /\nSitemap: ${canonicalOrigin}/sitemap.xml\n`);
+await writeFile(`${output}/csp-hashes.json`, JSON.stringify(scripts));
+await writeFile(`${output}/policy-source.sha256`, createHash('sha256').update(await readFile('src/components/pages/PublicPages.tsx')).digest('hex'));
+await writeFile(`${output}/content.sha256`, createHash('sha256').update(JSON.stringify(content)).digest('hex'));
+console.log('Public pages prerendered; private routes have generic noindex HTML. Publication remains subject to release:check.');
