@@ -479,7 +479,7 @@ try {
     await command("Page.navigate", { url: `${server.url}auth/callback?error=access_denied` });
     await until(async () => await text("Sign-in wasn't completed"), "callback error"); await shot("auth-error");
     configMode = 'failed'; await command('Page.navigate',{url:`${server.url}dashboard`});
-    await until(async () => await text("Nuelexity couldn't start"),'configuration failure'); await shot('configuration-failed');
+    await until(async () => await text("The workspace couldn’t load"),'configuration failure'); await shot('configuration-failed');
     configMode = 'missing-auth'; await command('Page.navigate',{url:`${server.url}auth`});
     await until(async () => await text('Sign-in setup is incomplete'),'unconfigured auth'); await shot('auth-unconfigured');
     configMode = 'ready';

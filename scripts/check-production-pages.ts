@@ -30,7 +30,7 @@ try {
   socket.onmessage=event=>{const packet=JSON.parse(String(event.data));if(packet.method==='Log.entryAdded'&&/content security|content-security|violates.*directive/i.test(packet.params.entry.text))violations.push(packet.params.entry.text);const waiter=pending.get(packet.id);if(!waiter)return;pending.delete(packet.id);packet.error?waiter.reject(new Error(packet.error.message)):waiter.resolve(packet.result);};
   await new Promise<void>(resolve=>{socket!.onopen=()=>resolve();});await send('Page.enable');
   await send("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' });await send('Runtime.enable');await send('Log.enable');
-  for(const [route,selector] of [['/','#question'],['/about','.return-cat'],['/legal#terms','#terms'],['/auth','.oauth-button'],['/account','.oauth-button'],['/missing','.document-title']] as const){
+  for(const [route,selector] of [['/','.about-hero .primary-link'],['/about','.return-cat'],['/legal#terms','#terms'],['/auth','.oauth-button'],['/account','.oauth-button'],['/missing','.document-title']] as const){
     const response=await fetch(base+route);assert.equal(response.status,route==='/missing'?404:200);
     assert.match(response.headers.get('content-security-policy')!,/script-src 'self'/);assert.match(response.headers.get('cache-control')!,/no-store/);
     await send('Page.navigate',{url:base+route});await until(()=>evaluate(`!!document.querySelector('${selector}')`),route+' rendered under CSP');

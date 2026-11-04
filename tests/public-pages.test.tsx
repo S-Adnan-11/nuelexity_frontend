@@ -1,8 +1,8 @@
 import { test, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { StaticRouter } from 'react-router';
-import { About, Legal, PublicInformation } from '../src/components/pages/PublicPages';
-import { routeMetadata } from '../src/lib/seo';
+import { About, Legal, PublicHome, PublicInformation } from '../src/components/pages/PublicPages';
+import { canonicalOrigin, publicPaths, routeMetadata, routeStructuredData } from '../src/lib/seo';
 
 test('legal sections keep stable anchors without internal review commentary or an invented effective date', () => {
   const html = renderToStaticMarkup(<StaticRouter location="/legal"><Legal /></StaticRouter>);
@@ -30,6 +30,19 @@ test('only intended public routes are indexable; private metadata never uses a t
     expect(routeMetadata(route).index).toBe(false);
     expect(routeMetadata(route).canonical).toBeNull();
   }
+});
+test('full-beta homepage contains the product and existing workspace entry without a closed-release message', () => {
+  const html = renderToStaticMarkup(<StaticRouter location="/"><PublicHome /></StaticRouter>);
+  expect(html).toContain('Nuelexity, an independent research project');
+  expect(html).toContain('href="/dashboard"');
+  expect(html).not.toMatch(/research.*not open|Public preview|Research and sign-in are closed/);
+  expect(publicPaths).toEqual(['/', '/about', '/legal']);
+});
+test('structured data describes only visible public identity and never private routes or unsupported features', () => {
+  expect(routeStructuredData('/')).toEqual({ '@context': 'https://schema.org', '@type': 'WebSite', name: 'Nuelexity', url: canonicalOrigin + '/', description: routeMetadata('/').description, inLanguage: 'en' });
+  expect(routeStructuredData('/about')?.['@type']).toBe('AboutPage');
+  for (const route of ['/legal', '/auth', '/account', '/dashboard', '/dashboard/private-thread', '/missing']) expect(routeStructuredData(route)).toBeNull();
+  expect(JSON.stringify(publicPaths.map(routeStructuredData))).not.toMatch(/SearchAction|Organization|AggregateRating|Review|private-thread/);
 });
 
 test('public preview and full application receive accurate release-specific legal introductions', () => {

@@ -172,7 +172,7 @@ try {
   }
   for (const size of [sizes[0]!, sizes[2]!]) {
     await send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: size.width < 800 });
-    for (const theme of ['dark','light']) { await go('/', 'Guest workspace'); await evaluate(`document.documentElement.dataset.theme='${theme}'`); await shot(`home-guest-${theme}-${size.width}`); }
+    for (const theme of ['dark','light']) { await go('/dashboard', 'Guest workspace'); await evaluate(`document.documentElement.dataset.theme='${theme}'`); await shot(`workspace-guest-${theme}-${size.width}`); }
   }
   await go('/legal#terms', 'Privacy, storage & terms.');
   assert.equal(await evaluate('document.activeElement.id'), 'terms');

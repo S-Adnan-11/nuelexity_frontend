@@ -2,10 +2,10 @@ import { build } from "vite";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { About, Legal, NotFound, PublicHome, PublicInformation, Unavailable } from "./src/components/pages/PublicPages";
-import { canonicalOrigin, routeMetadata } from "./src/lib/seo";
+import { canonicalOrigin, publicPaths, routeMetadata, serializedStructuredData } from "./src/lib/seo";
 import { publicEnv } from "./public-env.mjs";
 import content from "./site-content.json";
 
@@ -25,12 +25,14 @@ function document(path: string, body: string) {
     .replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/>/, `<meta name="description" content="${escape(meta.description)}" />`)
     .replace(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${escape(meta.title)}" />`)
     .replace(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${escape(meta.description)}" />`)
+    .replace(/<meta name="twitter:title"[^>]*>/, `<meta name="twitter:title" content="${escape(meta.title)}" />`)
+    .replace(/<meta name="twitter:description"[^>]*>/, `<meta name="twitter:description" content="${escape(meta.description)}" />`)
     .replace(/<link rel="canonical"[^>]*>/, meta.canonical ? `<link rel="canonical" href="${canonicalOrigin}${meta.canonical}" />` : '')
     .replace(/<meta property="og:url"[^>]*>/, meta.canonical ? `<meta property="og:url" content="${canonicalOrigin}${meta.canonical}" />` : '')
     .replace('<head>', `<head>\n<meta name="robots" content="${meta.index ? 'index,follow' : 'noindex,nofollow'}" />`)
-    .replace(/<div id="root">[\s\S]*<\/div>\s*<\/body>/, `<div id="root">${body}</div>\n</body>`);
-  if (path === '/' || path === '/about') {
-    const data = JSON.stringify({ '@context': 'https://schema.org', '@type': path === '/' ? 'WebSite' : 'AboutPage', name: 'Nuelexity', url: canonicalOrigin + path, description: meta.description }).replaceAll('<', '\\u003c');
+    .replace(/<div id="root">[\s\S]*<\/div>\s*<\/body>/, `<div id="root"${meta.index ? ` data-prerendered-public="${path}"` : ''}>${body}</div>\n</body>`);
+  const data = serializedStructuredData(path);
+  if (data) {
     scripts.push(`'sha256-${createHash('sha256').update(data).digest('base64')}'`);
     html = html.replace('</head>', `<script type="application/ld+json">${data}</script></head>`);
   }
@@ -38,17 +40,17 @@ function document(path: string, body: string) {
   return html;
 }
 for (const [route, Component] of [['/', PublicHome], ['/about', About], ['/legal', Legal], ['/404', NotFound]] as const) {
-  const html = document(route, renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: limited }, createElement(Component)))));
+  const html = document(route, renderToString(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: limited }, createElement(Component)))));
   const file = route === '/' ? `${output}/index.html` : route === '/404' ? `${output}/404.html` : `${output}${route}/index.html`;
   await mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
   await writeFile(file, html);
 }
 for (const route of ['/account', '/auth', '/auth/callback', '/dashboard']) {
   await mkdir(`${output}${route}`, { recursive: true });
-  await writeFile(`${output}${route}/index.html`, document(route, limited ? renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening Nuelexity…</main>'));
+  await writeFile(`${output}${route}/index.html`, document(route, limited ? renderToString(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening Nuelexity…</main>'));
 }
-await writeFile(`${output}/private.html`, document('/dashboard', limited ? renderToStaticMarkup(createElement(StaticRouter, { location: '/dashboard' }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening your workspace…</main>'));
-await writeFile(`${output}/sitemap.xml`, `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/about', '/legal'].map(route => `<url><loc>${canonicalOrigin}${route}</loc></url>`).join('')}</urlset>\n`);
+await writeFile(`${output}/private.html`, document('/dashboard', limited ? renderToString(createElement(StaticRouter, { location: '/dashboard' }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening your workspace…</main>'));
+await writeFile(`${output}/sitemap.xml`, `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${publicPaths.map(route => `<url><loc>${canonicalOrigin}${route}</loc></url>`).join('')}</urlset>\n`);
 // Let crawlers see private routes' noindex. Robots exclusions cannot protect data.
 await writeFile(`${output}/robots.txt`, `User-agent: *\nAllow: /\nSitemap: ${canonicalOrigin}/sitemap.xml\n`);
 await writeFile(`${output}/csp-hashes.json`, JSON.stringify(scripts));

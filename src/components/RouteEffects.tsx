@@ -1,24 +1,30 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router";
-import { canonicalOrigin, routeMetadata } from "../lib/seo";
+import { canonicalOrigin, routeMetadata, serializedStructuredData } from "../lib/seo";
 export function RouteEffects() {
   const { pathname, hash } = useLocation();
   useEffect(() => {
     const meta = routeMetadata(pathname);
-    document.head.querySelectorAll('script[type="application/ld+json"]').forEach(node => {
-      try {
-        const data = JSON.parse(node.textContent || '{}');
-        if (!['/', '/about'].includes(pathname) || data.url !== canonicalOrigin + pathname) node.remove();
-      } catch { node.remove(); }
-    });
+    const data = serializedStructuredData(pathname);
+    const schemas = [...document.head.querySelectorAll('script[type="application/ld+json"]')];
+    if (!data || schemas.length !== 1 || schemas[0]?.textContent !== data) {
+      schemas.forEach(node => node.remove());
+      if (data) {
+        const schema = document.createElement("script");
+        schema.type = "application/ld+json"; schema.textContent = data;
+        document.head.append(schema);
+      }
+    }
     document.title = meta.title;
     function set(selector: string, attribute: string, value: string) {
       document.head.querySelector(selector)?.setAttribute(attribute, value);
     }
     set('meta[name="description"]', "content", meta.description);
-    set('meta[name="robots"]', "content", meta.index ? "index,follow" : "noindex,nofollow");
+    set('meta[name="robots"]', "content", meta.index && !location.hostname.endsWith(".pages.dev") ? "index,follow" : "noindex,nofollow");
     set('meta[property="og:title"]', "content", meta.title);
     set('meta[property="og:description"]', "content", meta.description);
+    set('meta[name="twitter:title"]', "content", meta.title);
+    set('meta[name="twitter:description"]', "content", meta.description);
     let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (meta.canonical) {
       if (!canonical) { canonical = document.createElement("link"); canonical.rel = "canonical"; document.head.append(canonical); }
