@@ -391,6 +391,9 @@ function Workspace() {
   function submit(value = query) {
     const question = value.trim();
     if (!question || question.length > 1000 || busy || controllerRef.current || loadingThread || loading) return;
+    // Every submission path shares this fence. Drafting never queues a guest
+    // search that could run later without a fresh, deliberate submission.
+    if (!token && !guest.canSubmit()) return;
     if (threadStatus === "failed" || modelSaving || modelSaveError || modelBlocked) {
       setError("Open a conversation and save your model choice before sending.");
       return;
@@ -421,7 +424,7 @@ function Workspace() {
         : "The service could not become ready for search. Your question has been kept. Try again later.");
       return;
     }
-    if (startup !== "ready" || !modelReady || (!token && (!guest.ready || guest.checking || guest.verifying))) return;
+    if (startup !== "ready" || !modelReady || (!token && !guest.canSubmit())) return;
     const question = pendingQuestion.current, controller = controllerRef.current;
     pendingQuestion.current = null; // Synchronous fence before any asynchronous search work.
     setWaitingQuestion(null);
@@ -720,7 +723,7 @@ function Workspace() {
                           <p>Keep exploring</p>
                           {message.followUps.map((question) => (
                             <button
-                              disabled={busy || loadingThread || !modelReady}
+                              disabled={busy || loadingThread || !modelReady || (!token && !guest.canSubmit())}
                               key={question}
                               onClick={() => void submit(question)}
                             >
@@ -791,6 +794,7 @@ function Workspace() {
                     !query.trim() ||
                     loading ||
                     loadingThread ||
+                    (!token && !guest.canSubmit()) ||
                     threadStatus === "failed" || modelSaving || !!modelSaveError || modelBlocked
                   }
                   aria-label="Send question"
@@ -800,6 +804,7 @@ function Workspace() {
               )}
             </div>
           </form>
+          {startup === "starting" && <p role="status" className="quota-note">Starting the service. You can keep drafting while it connects.</p>}
           {startup !== "ready" && startup !== "starting" && <p role="status" className="quota-note">
             {startup === "configuration" ? "The service needs configuration from its owner."
               : startup === "unavailable" ? "Our service is running but not ready for research. Try again later."
@@ -816,15 +821,22 @@ function Workspace() {
             !loading &&
             !guest.ready &&
             !guest.checking &&
+            !guest.verifying &&
             !guest.error &&
+            startup === "ready" &&
             TURNSTILE_SITE_KEY && (
               <Turnstile onToken={guest.verify} onError={guest.onError} resetKey={guest.resetKey} />
             )}
-          {!token && !loading && (guest.checking || guest.verifying) && <p role="status" className="sr-only">Checking guest verification…</p>}
+          {!token && !loading && startup === "ready" && !guest.error && !guest.ready && <p role="status" className="quota-note">
+            {guest.checking ? "Checking guest clearance…" : guest.verifying ? "Completing guest verification…" : "Complete the security check to send. You can keep drafting."}
+          </p>}
           {!token && guest.error && (
             <p role="alert" className="error-notice">
               {guest.error}{" "}
-              <button type="button" onClick={guest.reset}>
+              <button type="button" onClick={() => {
+                if (startup !== "ready") { backendStartup.reset(); void refreshModels(); }
+                guest.reset();
+              }}>
                 Retry verification
               </button>
             </p>

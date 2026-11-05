@@ -8,9 +8,13 @@ interface TurnstileApi {
       sitekey: string;
       action: string;
       theme: string;
+      retry: "never";
+      "refresh-expired": "never";
+      "refresh-timeout": "never";
       callback: (token: string) => void;
       "expired-callback": () => void;
-      "error-callback": () => void;
+      "error-callback": () => boolean;
+      "timeout-callback": () => void;
     },
   ): string;
   remove(id: string): void;
@@ -27,12 +31,16 @@ function load() {
     const script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
+    const fail = () => {
+      clearTimeout(timer);
+      script.onload = script.onerror = null;
       script.remove();
       scriptPromise = undefined;
-      reject(new Error("Verification couldn't load. Try refreshing the page."));
+      reject(new Error("The security check couldn’t load. Check your connection and retry verification."));
     };
+    const timer = setTimeout(fail, 15000);
+    script.onload = () => { if (!window.turnstile) return fail(); clearTimeout(timer); resolve(); };
+    script.onerror = fail;
     document.head.appendChild(script);
   });
   return scriptPromise;
@@ -58,12 +66,16 @@ export function Turnstile({
           sitekey: TURNSTILE_SITE_KEY,
           action: "search",
           theme: "dark",
-          callback: onToken,
-          "expired-callback": () => onToken(""),
+          retry: "never",
+          "refresh-expired": "never",
+          "refresh-timeout": "never",
+          callback: token => { if (active) onToken(token); },
+          "expired-callback": () => { if (active) onToken(""); },
           "error-callback": () => {
-            onToken("");
-            onError("Verification failed. Try refreshing the page.");
+            if (active) onError("The security challenge failed. Please retry verification.");
+            return true;
           },
+          "timeout-callback": () => { if (active) onError("The security challenge timed out. Please retry verification."); },
         });
       })
       .catch((error) => {

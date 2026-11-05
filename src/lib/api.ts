@@ -33,7 +33,12 @@ async function request(path: string, token: string | undefined, options: Request
   let early: Response | undefined;
   if (!options.method || options.method === "GET") {
     await withAbort(backendStartup.ensure(async signal => {
-      early = await raw(path, { ...settings, signal });
+      const response = await raw(path, { ...settings, signal });
+      // Read the wake response inside its attempt deadline. Readiness may take
+      // longer; retaining fetch's unread body leaves it tied to an expired signal.
+      early = new Response(await response.arrayBuffer(), {
+        status: response.status, statusText: response.statusText, headers: response.headers,
+      });
       return early;
     }), options.signal ?? undefined);
   }
