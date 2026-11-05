@@ -73,7 +73,7 @@ async function typeAndSubmit(question: string) {
 }
 async function open(entry: string, extra = "") {
   reads.length = 0; passes.length = 0;
-  await command("Page.navigate", { url: `${server.url}dashboard?entry=${entry}${extra}` });
+  await command("Page.navigate", { url: `${server.url}?entry=${entry}${extra}` });
   await until(() => evaluate("!!document.querySelector('#question')"), "workspace");
 }
 try {

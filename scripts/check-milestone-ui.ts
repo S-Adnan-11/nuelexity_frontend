@@ -70,7 +70,15 @@ try {
   const go = async (route: string, text: string) => { const before = first!.commits(); await send('Page.navigate', { url: new URL(route, server.url).href }); await until(async () => first!.commits() > before, route + ' committed'); await until(async () => await evaluate(`!!document.body?.innerText.includes(${JSON.stringify(text)})`), route).catch(async error=>{console.error('Fixture route state',await evaluate("({path:location.pathname,body:document.body?.innerText.slice(0,300),resources:performance.getEntriesByType('resource').slice(-6).map(r=>new URL(r.name).pathname)})"));throw error;}); await evaluate('document.fonts.ready'); await delay(150); };
   const shot = async (name: string) => { await send('Page.bringToFront'); const data = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(path.join(evidence, name + '.png'), Buffer.from(data.data, 'base64')); };
   const sizes = [{ width: 1440, height: 1000 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 320, height: 700 }];
-  await go('/dashboard', 'Guest workspace'); await signedIn(); await go('/account', 'Ada Curious');
+  await go('/', 'Guest workspace');
+  assert.equal(await evaluate('location.pathname'), '/', 'guest entry stays at the root');
+  await signedIn(); await go('/', 'Where curiosity');
+  assert.ok(await evaluate("!!document.querySelector('#question')&&!document.querySelector('.eligibility-page')"), 'root restores the signed-in workspace');
+  assert.ok(await evaluate("document.body.innerText.includes('Ada Curious')"), 'root retains the restored identity');
+  await evaluate(`sessionStorage.setItem('nuelexity:active-thread:${owner}', '${thread}')`);
+  await go('/', 'Private fixture answer');
+  assert.equal(await evaluate('location.pathname'), '/dashboard/'+thread, 'root restores the saved thread through its existing owned deep link');
+  await go('/account', 'Ada Curious');
   assert.ok(await evaluate("document.body.innerText.includes('Google · GitHub')"));
   assert.equal(await evaluate("!!document.querySelector('.avatar img')"), false, 'avatar waits for user action');
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.innerText==='Load provider profile picture').click()");

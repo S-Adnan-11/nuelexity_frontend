@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { About, Legal, NotFound, PublicHome, PublicInformation, Unavailable } from "./src/components/pages/PublicPages";
+import { ResearchEntry } from "./src/components/ResearchEntry";
 import { canonicalOrigin, publicPaths, routeMetadata, serializedStructuredData } from "./src/lib/seo";
 import { publicEnv } from "./public-env.mjs";
 import content from "./site-content.json";
@@ -19,7 +20,7 @@ if (!limited) await writeFile(`${output}/config.json`, JSON.stringify(publicEnv(
 const template = await readFile(`${output}/${limited ? "public-information.html" : "index.html"}`, "utf8");
 const escape = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 const scripts: string[] = [];
-function document(path: string, body: string) {
+function document(path: string, body: string, hydratePublic = true) {
   const meta = routeMetadata(path);
   let html = template.replace(/<title>[^<]*<\/title>/, `<title>${escape(meta.title)}</title>`)
     .replace(/<meta\s+name="description"\s+content="[^"]*"\s*\/>/, `<meta name="description" content="${escape(meta.description)}" />`)
@@ -30,7 +31,7 @@ function document(path: string, body: string) {
     .replace(/<link rel="canonical"[^>]*>/, meta.canonical ? `<link rel="canonical" href="${canonicalOrigin}${meta.canonical}" />` : '')
     .replace(/<meta property="og:url"[^>]*>/, meta.canonical ? `<meta property="og:url" content="${canonicalOrigin}${meta.canonical}" />` : '')
     .replace('<head>', `<head>\n<meta name="robots" content="${meta.index ? 'index,follow' : 'noindex,nofollow'}" />`)
-    .replace(/<div id="root">[\s\S]*<\/div>\s*<\/body>/, `<div id="root"${meta.index ? ` data-prerendered-public="${path}"` : ''}>${body}</div>\n</body>`);
+    .replace(/<div id="root">[\s\S]*<\/div>\s*<\/body>/, `<div id="root"${meta.index && hydratePublic ? ` data-prerendered-public="${path}"` : ''}>${body}</div>\n</body>`);
   const data = serializedStructuredData(path);
   if (data) {
     scripts.push(`'sha256-${createHash('sha256').update(data).digest('base64')}'`);
@@ -39,8 +40,8 @@ function document(path: string, body: string) {
   if (content.searchConsoleVerification && /^[a-zA-Z0-9_-]+$/.test(content.searchConsoleVerification)) html = html.replace('</head>', `<meta name="google-site-verification" content="${content.searchConsoleVerification}" /></head>`);
   return html;
 }
-for (const [route, Component] of [['/', PublicHome], ['/about', About], ['/legal', Legal], ['/404', NotFound]] as const) {
-  const html = document(route, renderToString(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: limited }, createElement(Component)))));
+for (const [route, Component] of [['/', limited ? PublicHome : ResearchEntry], ['/about', About], ['/legal', Legal], ['/404', NotFound]] as const) {
+  const html = document(route, renderToString(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: limited }, createElement(Component)))), limited || route !== '/');
   const file = route === '/' ? `${output}/index.html` : route === '/404' ? `${output}/404.html` : `${output}${route}/index.html`;
   await mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
   await writeFile(file, html);

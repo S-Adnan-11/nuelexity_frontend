@@ -52,7 +52,11 @@ try {
     const response = await fetch(base + route), html = await response.text();
     assert.ok(html.includes(`<link rel="canonical" href="https://nuelexity.devs.surf${route}"`));
     assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/);
-    assert.ok(html.includes('<h1>'), 'readable initial HTML');
+    assert.match(html, /<h1\b/, 'initial page heading');
+    if (route === '/') {
+      assert.ok(html.includes('Opening your workspace…'), 'neutral app entry HTML');
+      assert.ok(!html.includes('about-hero') && !html.includes('data-prerendered-public'), 'no promotional homepage or public hydration mismatch');
+    }
   }
   const sitemap = await (await fetch(base + '/sitemap.xml')).text();
   assert.equal((sitemap.match(/<loc>/g) || []).length, 3);
