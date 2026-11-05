@@ -45,9 +45,9 @@ for (const [route, Component] of [['/', PublicHome], ['/about', About], ['/legal
 }
 for (const route of ['/account', '/auth', '/auth/callback', '/dashboard']) {
   await mkdir(`${output}${route}`, { recursive: true });
-  await writeFile(`${output}${route}/index.html`, document(route, limited ? renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening Nuelexity…</main>'));
+  await writeFile(`${output}${route}/index.html`, document(route, limited ? renderToStaticMarkup(createElement(StaticRouter, { location: route }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status"></main>'));
 }
-await writeFile(`${output}/private.html`, document('/dashboard', limited ? renderToStaticMarkup(createElement(StaticRouter, { location: '/dashboard' }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status">Opening your workspace…</main>'));
+await writeFile(`${output}/private.html`, document('/dashboard', limited ? renderToStaticMarkup(createElement(StaticRouter, { location: '/dashboard' }, createElement(PublicInformation, { value: true }, createElement(Unavailable)))) : '<main class="workspace-pending" role="status"></main>'));
 await writeFile(`${output}/sitemap.xml`, `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/about', '/legal'].map(route => `<url><loc>${canonicalOrigin}${route}</loc></url>`).join('')}</urlset>\n`);
 // Let crawlers see private routes' noindex. Robots exclusions cannot protect data.
 await writeFile(`${output}/robots.txt`, `User-agent: *\nAllow: /\nSitemap: ${canonicalOrigin}/sitemap.xml\n`);

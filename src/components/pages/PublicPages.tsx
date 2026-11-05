@@ -29,12 +29,12 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
     <main id="page-content" tabIndex={-1}>{children}</main><Footer />
   </div>;
 }
-function DeveloperLink({ href, label, children }: { href: string; label: string; children: ReactNode }) {
+function DeveloperLink({ href, children }: { href: string; children: ReactNode }) {
   const [dismissed, setDismissed] = useState(false);
-  return <a className="developer-link" href={href} target="_blank" rel="noopener noreferrer" aria-label={label}
+  return <a className="developer-link" href={href} target="_blank" rel="noopener noreferrer"
     data-label-dismissed={dismissed || undefined} onFocus={() => setDismissed(false)} onMouseEnter={() => setDismissed(false)}
     onKeyDown={event => { if (event.key === "Escape") setDismissed(true); }}>
-    {children}<span className="developer-link-label" aria-hidden="true">{label}</span>
+    {children}
   </a>;
 }
 export function About() {
@@ -72,9 +72,9 @@ export function About() {
       <h3>Real limits</h3><p>Search grounding makes evidence easier to inspect. It cannot guarantee accuracy, complete coverage, reliable sources or a citation for every sentence. Answers may be wrong or incomplete; important decisions need independent verification.</p>
       <p>Free provider allowances and shared quotas limit availability. Conversation context and answer length are limited. Guest threads are temporary. There is no public sharing, file upload, subscription or autonomous browsing agent.</p>
     </div></section>
-    <section className="developer-card"><BrandMark size={44} /><div><p className="eyebrow">BEHIND THE PROJECT</p><h2>{content.developer.displayName || "An independent learning project"}</h2>
+    <section className="developer-card"><BrandMark size={45} /><div><p className="eyebrow">BEHIND THE PROJECT</p><h2>{content.developer.displayName || "An independent learning project"}</h2>
       <p>Built with curiosity, an appetite for learning and a desire to understand how things work.</p>
-      {(github || portfolio) && <nav aria-label="Developer links">{github && <DeveloperLink href={github} label="S. Adnan on GitHub (opens in a new tab)"><GitHubIcon /></DeveloperLink>}{portfolio && <DeveloperLink href={portfolio} label="S. Adnan’s website (opens in a new tab)"><Globe size={20} aria-hidden="true" focusable="false" /></DeveloperLink>}</nav>}
+      {(github || portfolio) && <nav aria-label="Developer links">{github && <DeveloperLink href={github} ><GitHubIcon /></DeveloperLink>}{portfolio && <DeveloperLink href={portfolio}><Globe size={20} aria-hidden="true" focusable="false" /></DeveloperLink>}</nav>}
     </div></section>
   </PublicLayout>;
 }

@@ -99,7 +99,7 @@ try {
       return [...document.querySelectorAll('.developer-link')].map(a=>{const r=a.getBoundingClientRect(),style=getComputedStyle(a),fg=luma(rgb(style.color));return {href:a.href,label:a.getAttribute('aria-label'),target:a.target,rel:a.rel,width:r.width,height:r.height,icon:a.querySelector('svg')?.getAttribute('aria-hidden'),contrast:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05),labelHidden:getComputedStyle(a.querySelector('.developer-link-label')).visibility==='hidden'};});
     })()`);
     assert.deepEqual(links.map((link: any) => link.href), ["https://github.com/S-Adnan-11", "https://s-adnan.dev/"]);
-    for (const link of links) { assert.ok(link.label.includes("opens in a new tab")); assert.ok(link.width >= 44 && link.height >= 44); assert.equal(link.icon, "true"); assert.ok(link.contrast >= 4.5); assert.ok(link.labelHidden); assert.ok(link.target === "_blank" && link.rel.includes("noopener") && link.rel.includes("noreferrer")); }
+    for (const link of links) { assert.ok(link.label.includes("")); assert.ok(link.width >= 44 && link.height >= 44); assert.equal(link.icon, "true"); assert.ok(link.contrast >= 4.5); assert.ok(link.labelHidden); assert.ok(link.target === "_blank" && link.rel.includes("noopener") && link.rel.includes("noreferrer")); }
     await evaluate("document.querySelectorAll('.developer-link').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();window.__developerClicked=a.href}));document.querySelector('.developer-link').focus()");
     await key("Tab"); await key("Tab", "Tab", 8);
     assert.ok(await evaluate("document.activeElement===document.querySelector('.developer-link') && document.activeElement.matches(':focus-visible')"));

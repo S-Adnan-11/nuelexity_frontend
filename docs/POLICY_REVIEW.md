@@ -1,3 +1,5 @@
+> Historical review. The owner selected the adults-only V1 direction on 2026-10-30. See [the complete assembled candidate](FINAL_POLICY.md) and [implementation/evidence record](POLICY_IMPLEMENTATION.md). Final assembled approval and the actual publication date remain unset; the older Google-before-all-publication sequence below is superseded.
+
 # Policy review for V1 publication — 2026-10-28
 
 Visual presentation is approved. This document presents the **complete current rendered policy**, followed by the decisions and precise proposed edits needed before publication. It is a draft for the owner, not legal approval or a new product design. No replacement wording below has been silently adopted.
