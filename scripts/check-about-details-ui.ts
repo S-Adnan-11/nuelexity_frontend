@@ -96,36 +96,33 @@ try {
     const links = await evaluate(`(()=>{
       const rgb=s=>s.match(/[\\d.]+/g).slice(0,3).map(Number),luma=c=>c.map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4}).reduce((s,n,i)=>s+n*[.2126,.7152,.0722][i],0);
       const bg=luma(rgb(getComputedStyle(document.querySelector('.developer-card')).backgroundColor));
-      return [...document.querySelectorAll('.developer-link')].map(a=>{const r=a.getBoundingClientRect(),style=getComputedStyle(a),fg=luma(rgb(style.color));return {href:a.href,label:a.getAttribute('aria-label'),target:a.target,rel:a.rel,width:r.width,height:r.height,icon:a.querySelector('svg')?.getAttribute('aria-hidden'),contrast:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05),labelHidden:getComputedStyle(a.querySelector('.developer-link-label')).visibility==='hidden'};});
+      return [...document.querySelectorAll('.developer-link')].map(a=>{const r=a.getBoundingClientRect(),style=getComputedStyle(a),fg=luma(rgb(style.color));return {href:a.href,label:a.getAttribute('aria-label'),target:a.target,rel:a.rel,width:r.width,height:r.height,icon:a.querySelector('svg')?.getAttribute('aria-hidden'),contrast:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)};});
     })()`);
     assert.deepEqual(links.map((link: any) => link.href), ["https://github.com/S-Adnan-11", "https://s-adnan.dev/"]);
-    for (const link of links) { assert.ok(link.label.includes("opens in a new tab")); assert.ok(link.width >= 44 && link.height >= 44); assert.equal(link.icon, "true"); assert.ok(link.contrast >= 4.5); assert.ok(link.labelHidden); assert.ok(link.target === "_blank" && link.rel.includes("noopener") && link.rel.includes("noreferrer")); }
+    assert.deepEqual(links.map((link: any) => link.label), ["GitHub", "Website"]);
+    for (const link of links) { assert.ok(link.width >= 44 && link.height >= 44); assert.equal(link.icon, "true"); assert.ok(link.contrast >= 4.5); assert.ok(link.target === "_blank" && link.rel.includes("noopener") && link.rel.includes("noreferrer")); }
     await evaluate("document.querySelectorAll('.developer-link').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();window.__developerClicked=a.href}));document.querySelector('.developer-link').focus()");
     await key("Tab"); await key("Tab", "Tab", 8);
     assert.ok(await evaluate("document.activeElement===document.querySelector('.developer-link') && document.activeElement.matches(':focus-visible')"));
-    const focus = await evaluate("(()=>{const a=document.activeElement,s=getComputedStyle(a),r=a.querySelector('.developer-link-label').getBoundingClientRect();return {outline:s.outlineStyle,width:parseFloat(s.outlineWidth),label:getComputedStyle(a.querySelector('.developer-link-label')).visibility,fits:r.left>=0&&r.right<=innerWidth}})()");
-    assert.ok(focus.outline !== "none" && focus.width >= 2 && focus.label === "visible" && focus.fits);
+    const focus = await evaluate("(()=>{const a=document.activeElement,s=getComputedStyle(a),r=a.getBoundingClientRect();return {outline:s.outlineStyle,width:parseFloat(s.outlineWidth),fits:r.left>=0&&r.right<=innerWidth}})()");
+    assert.ok(focus.outline !== "none" && focus.width >= 2 && focus.fits);
     await shot(`project-${width}-${theme}-focus`);
-    await key("Escape"); assert.equal(await evaluate("getComputedStyle(document.activeElement.querySelector('.developer-link-label')).visibility"), "hidden");
     await key("Tab");
-    assert.ok(await evaluate("document.activeElement===document.querySelectorAll('.developer-link')[1] && getComputedStyle(document.activeElement.querySelector('.developer-link-label')).visibility==='visible'"));
+    assert.ok(await evaluate("document.activeElement===document.querySelectorAll('.developer-link')[1] && document.activeElement.matches(':focus-visible')"));
     await key("Enter"); assert.equal(await evaluate("window.__developerClicked"), "https://s-adnan.dev/");
     await evaluate("document.activeElement.blur()");
     const point = await evaluate("(()=>{const r=document.querySelector('.developer-link').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.developer-link-label')).visibility"), "visible");
-    const labelPoint = await evaluate("(()=>{const r=document.querySelector('.developer-link-label').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...labelPoint });
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.developer-link-label')).visibility"), "visible", "label remains available on hover");
+    assert.equal(await evaluate("document.querySelectorAll('.developer-link-label').length"), 0, "no added hover/focus wording");
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 0, y: 0 });
     await shot(`project-${width}-${theme}`);
     const ax = await send("Accessibility.getFullAXTree");
     for (const link of links) assert.ok(ax.nodes.some((node: any) => !node.ignored && node.role?.value === "link" && node.name?.value === link.label), "accessible icon link name");
-    layouts.push({ width, theme, frame, links, keyboardFocus: true, hoverAndFocusLabels: true, escapeDismissal: true, keyboardActivation: true });
+    layouts.push({ width, theme, frame, links, keyboardFocus: true, iconOnlyLinks: true, keyboardActivation: true });
   }
   assert.deepEqual(external, []); assert.deepEqual(failures, []);
   await writeFile(path.join(evidence, "verification.json"), JSON.stringify({ layouts, external, applicationRequests: failures, realScreenReaderTested: false, source: "local built page; external links prevented only by test fixture" }, null, 2));
-  console.log("PASS About frame/icons: both themes at 390/1440/1920, centered title, decorative RGB dots, enlarged demo, local icons, 44px targets, contrast, keyboard focus/activation, descriptive hover/focus labels, Escape dismissal, accessibility tree, zero API/provider/external calls. Evidence: " + evidence);
+  console.log("PASS About frame/icons: both themes at 390/1440/1920, centered title, decorative RGB dots, enlarged demo, local icons, 44px targets, contrast, keyboard focus/activation, concise accessible names without hover text, accessibility tree, zero API/provider/external calls. Evidence: " + evidence);
 } finally {
   socket?.close(); chrome.kill(); await chrome.exited; server.stop();
   await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });

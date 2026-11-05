@@ -804,7 +804,6 @@ function Workspace() {
               )}
             </div>
           </form>
-          {startup === "starting" && <p role="status" className="quota-note">Starting the service. You can keep drafting while it connects.</p>}
           {startup !== "ready" && startup !== "starting" && <p role="status" className="quota-note">
             {startup === "configuration" ? "The service needs configuration from its owner."
               : startup === "unavailable" ? "Our service is running but not ready for research. Try again later."
@@ -828,7 +827,7 @@ function Workspace() {
               <Turnstile onToken={guest.verify} onError={guest.onError} resetKey={guest.resetKey} />
             )}
           {!token && !loading && startup === "ready" && !guest.error && !guest.ready && <p role="status" className="quota-note">
-            {guest.checking ? "Checking guest clearance…" : guest.verifying ? "Completing guest verification…" : "Complete the security check to send. You can keep drafting."}
+            {guest.checking ? "Checking guest clearance…" : guest.verifying ? "Completing guest verification…" : "Complete the security check."}
           </p>}
           {!token && guest.error && (
             <p role="alert" className="error-notice">

@@ -30,7 +30,7 @@ for(const route of ["/","/about","/legal","/account","/auth","/auth/callback","/
     for(const data of schemas)assert.ok(csp?.includes("'sha256-"+createHash('sha256').update(data).digest('base64')+"'"),'structured-data CSP hash');
     assert.ok(!/SearchAction|AggregateRating|"@type":"Organization"/.test(schemas.join('')));
     if(route==='/') {
-      assert.ok(html.includes('Opening your workspace…')&&html.includes('<noscript>'),'neutral app entry with a no-JavaScript explanation');
+      assert.ok(html.includes('role="status" class="sr-only">Loading…')&&html.includes('<noscript>'),'quiet accessible app entry with a no-JavaScript explanation');
       assert.ok(!/about-hero|data-prerendered-public|Where curiosity<br\s*\/>finds its answers/.test(html),'no promotional page in initial HTML');
       const token=JSON.parse(await readFile('site-content.json','utf8')).searchConsoleVerification;
       assert.ok(token&&html.slice(0,html.indexOf('</head>')).includes(`name="google-site-verification" content="${token}"`),'Search Console tag preserved in head');
@@ -59,6 +59,9 @@ let holdScripts=false;const heldScripts:string[]=[];
 const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(fn:()=>Promise<unknown>,label:string){for(let i=0;i<200;i++){if(await fn())return;await delay(50)}throw new Error("Pages browser timeout: "+label)}
 function send(method:string,params:any={}){return new Promise<any>((resolve,reject)=>{const id=++sequence,timer=setTimeout(()=>reject(new Error("CDP timeout "+method)),15000);pending.set(id,{resolve:v=>{clearTimeout(timer);resolve(v)},reject:e=>{clearTimeout(timer);reject(e)}});socket!.send(JSON.stringify({id,method,params}));});}
+// Navigation can cancel a paused request before its interception response arrives.
+async function intercepted(method:string,params:any){try{return await send(method,params)}catch(error){if(!/Invalid InterceptionId/.test(String(error)))throw error}}
+function respond(method:string,params:any){void intercepted(method,params).catch(()=>errors.push('Interception failed'));}
 async function evaluate(expression:string){const r=await send("Runtime.evaluate",{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error("Pages expression failed: "+expression.slice(0,100));return r.result.value;}
 try{
   let port="";await until(async()=>{try{port=(await readFile(path.join(profile,"DevToolsActivePort"),"utf8")).split("\n")[0]!;return port}catch{return false}},"Chrome");
@@ -66,16 +69,16 @@ try{
   socket.onmessage=event=>{const p=JSON.parse(String(event.data));if(p.method==='Page.frameNavigated'&&!p.params.frame.parentId)commits++;if(p.method==='Runtime.exceptionThrown')errors.push('Uncaught browser exception');if(p.method==='Runtime.consoleAPICalled'&&p.params.type==='error')errors.push('Console: '+p.params.args.map((a:any)=>a.value||a.description||'').join(' ').slice(0,240));if(p.method==='Log.entryAdded'&&/content.security|violat.*directive/i.test(p.params.entry.text))errors.push('CSP failure');
     if(p.method==='Fetch.requestPaused'){
       const url=new URL(p.params.request.url);let body:object|undefined;
-      if(url.origin!==base){external.push(url.origin);void send('Fetch.failRequest',{requestId:p.params.requestId,errorReason:'BlockedByClient'});}
-      else if(url.pathname==='/nuelexity_ask'){errors.push('Unexpected search submission');void send('Fetch.failRequest',{requestId:p.params.requestId,errorReason:'BlockedByClient'});}
+      if(url.origin!==base){external.push(url.origin);respond('Fetch.failRequest',{requestId:p.params.requestId,errorReason:'BlockedByClient'});}
+      else if(url.pathname==='/nuelexity_ask'){errors.push('Unexpected search submission');respond('Fetch.failRequest',{requestId:p.params.requestId,errorReason:'BlockedByClient'});}
       else{
         if(holdScripts&&url.pathname.startsWith('/assets/')&&url.pathname.endsWith('.js')){heldScripts.push(p.params.requestId);return;}
         if(url.pathname==='/config.json')body={BUN_PUBLIC_BACKEND_URL:base,BUN_PUBLIC_SUPABASE_URL:base+'/supabase',BUN_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'fixture-key',BUN_PUBLIC_TURNSTILE_SITE_KEY:''};
         else if(url.pathname==='/models')body={defaultModelId:'openai/gpt-oss-20b',canSelect:false,answerMode:'sources-only',models:[]};
         else if(['/ready','/health'].includes(url.pathname))body={status:'ready'};
         else if(url.pathname==='/guest/session')body={verified:false,verificationRequired:false,expiresAt:null};
-        if(body){mocked.push(url.pathname);void send('Fetch.fulfillRequest',{requestId:p.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify(body)).toString('base64')});}
-        else void send('Fetch.continueRequest',{requestId:p.params.requestId});
+        if(body){mocked.push(url.pathname);respond('Fetch.fulfillRequest',{requestId:p.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify(body)).toString('base64')});}
+        else respond('Fetch.continueRequest',{requestId:p.params.requestId});
       }
     }
     const w=pending.get(p.id);if(w){pending.delete(p.id);p.error?w.reject(new Error(p.error.message)):w.resolve(p.result);}
@@ -105,7 +108,7 @@ try{
       assert.equal(await evaluate('document.documentElement.dataset.theme'),theme,'early theme on slow entry');
       assert.ok(await evaluate("!document.querySelector('.about-hero,.eligibility-page,#question')&&document.querySelector('h1').textContent==='Nuelexity research'"),'only neutral startup HTML is displayed');
       assert.equal(mocked.length,callsBefore,'no config/auth/API before the app loads');
-      holdScripts=false;await Promise.all(heldScripts.splice(0).map(requestId=>send('Fetch.continueRequest',{requestId})));
+      holdScripts=false;await Promise.all(heldScripts.splice(0).map(requestId=>intercepted('Fetch.continueRequest',{requestId})));
       await until(()=>evaluate(returning?"!!document.querySelector('#question')":"!!document.querySelector('.eligibility-page')"),returning?'returning root composer':'fresh root eligibility');
       if(!returning) {
         assert.equal(mocked.length,callsBefore,'fresh root performs no private initialization before eligibility');
