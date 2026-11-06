@@ -66,3 +66,11 @@ docs/private/
 # Private policy working reports; publish only the assembled visitor copy.
 docs/POLICY_IMPLEMENTATION.md
 docs/POLICY_RELEASE_DELIVERY.md
+
+# Local policy exports and historical review material.
+docs/FINAL_POLICY.md
+docs/HANDOFF.md
+docs/CHAT_REFINEMENTS.md
+docs/POLICY_REVIEW.md
+docs/PRODUCTION_ACCEPTANCE.md
+docs/RELEASE_PREPARATION.md
