@@ -38,6 +38,8 @@ import { answerModelLabel } from "@/lib/models";
 import { useAuth } from "../AuthProvider";
 import { Answer } from "../Answer";
 import { SourceCards } from "../SourceCards";
+import { ReportAnswer } from "../ReportAnswer";
+import { requestErrorMessage } from "@/lib/request-error";
 import { Turnstile } from "../Turnstile";
 import { ModelSelector } from "../ModelSelector";
 import { BrandLogo, BrandMark, ThreadSkeleton, WorkspaceSkeleton } from "../Brand";
@@ -523,11 +525,7 @@ function Workspace() {
         if (error instanceof ApiError && ["UNKNOWN_MODEL", "MODEL_UNAVAILABLE", "MODEL_PERMISSION"].includes(error.code))
           void refreshModels();
         const failure = error as Error;
-        const retry =
-          error instanceof ApiError && error.retryAfter
-            ? ` Try again after ${new Date(Date.now() + error.retryAfter * 1000).toLocaleString()}.`
-            : "";
-        setError(failure.message + retry);
+        setError(requestErrorMessage(failure));
       }
     } finally {
       if (controllerRef.current === controller && mounted.current) {
@@ -708,6 +706,9 @@ function Workspace() {
                           <span className="status-dot" />
                           {stage}
                         </p>
+                      )}
+                      {message.status === "complete" && (
+                        <ReportAnswer />
                       )}
                       {message.status === "complete" && (
                         <button

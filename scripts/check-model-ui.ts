@@ -200,7 +200,13 @@ try {
   await submit("interrupted"); await idle();
   assert.ok(await evaluate("document.body.innerText.includes('connection closed before the answer finished')"));
   await submit("quota"); await idle();
-  assert.ok(await evaluate("document.body.innerText.includes('Search limit reached')"));
+  assert.ok(await evaluate("document.body.innerText.includes('Your daily search allowance is used up')"));
+  assert.equal(await evaluate("document.querySelector('#question').value"), "quota");
+  const refusedCount = requests.length;
+  await delay(250);
+  assert.equal(requests.length, refusedCount, "no automatic replay after a quota refusal");
+  assert.ok(await evaluate("!!document.querySelector('.answer-report summary')"));
+  assert.equal(await evaluate("document.querySelector('.answer-report a').getAttribute('href')"), "https://github.com/S-Adnan-11/nuelexity_backend/issues/new");
   await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await delay(300); // Allow the existing mobile sidebar transition to settle.
   assert.ok(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"));

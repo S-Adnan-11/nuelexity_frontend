@@ -68,7 +68,7 @@ export function About() {
       <p>Free provider allowances and shared quotas limit availability. Conversation context and answer length are limited. Guest threads are temporary. There is no public sharing, file upload, subscription or autonomous browsing agent.</p>
     </div></section>
     <section className="developer-card"><BrandMark size={45} /><div><p className="eyebrow">BEHIND THE PROJECT</p><h2>{content.developer.displayName || "An independent learning project"}</h2>
-      <p>Built with curiosity, an appetite for learning and a desire to understand how things work.</p>
+      <p>Nuelexity was created by S. Adnan. Built with curiosity, an appetite for learning and a desire to understand how things work.</p>
       {(github || portfolio) && <nav aria-label="Developer links">{github && <DeveloperLink href={github} label="GitHub"><GitHubIcon /></DeveloperLink>}{portfolio && <DeveloperLink href={portfolio} label="Website"><Globe size={20} aria-hidden="true" focusable="false" /></DeveloperLink>}</nav>}
     </div></section>
   </PublicLayout>;
