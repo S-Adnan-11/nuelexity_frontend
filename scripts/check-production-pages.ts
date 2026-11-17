@@ -31,7 +31,7 @@ try {
   await new Promise<void>(resolve=>{socket!.onopen=()=>resolve();});await send('Page.enable');
   await send("Page.addScriptToEvaluateOnNewDocument", { source: 'sessionStorage.setItem("nuelexity:eligibility.v1",JSON.stringify({version:"adults-v1-2026-10-30",adult:true,terms:true,confirmedAt:new Date().toISOString()}));' });await send('Runtime.enable');await send('Log.enable');
   for(const [route,selector] of [['/','#question'],['/about','.return-cat'],['/legal#terms','#terms'],['/auth','.oauth-button'],['/account','.oauth-button'],['/missing','.document-title']] as const){
-    const response=await fetch(base+route);assert.equal(response.status,route==='/missing'?404:200);
+    const response=await fetch(base+route);assert.equal(response.status,route==='/missing'?404:200,route);
     assert.match(response.headers.get('content-security-policy')!,/script-src 'self'/);assert.match(response.headers.get('cache-control')!,/no-store/);
     await send('Page.navigate',{url:base+route});await until(()=>evaluate(`!!document.querySelector('${selector}')`),route+' rendered under CSP');
     await until(()=>evaluate('!!document.querySelector(\'.site-footer\')'),'footer');

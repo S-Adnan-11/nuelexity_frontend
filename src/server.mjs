@@ -32,12 +32,14 @@ app.get("/config.json", (_req, res) => res.set("X-Robots-Tag", "noindex, nofollo
 for (const route of ['/', '/about', '/legal', '/account', '/auth', '/auth/callback', '/dashboard']) {
   app.get(route, (_req, res) => {
     if (!['/', '/about', '/legal'].includes(route)) res.set('X-Robots-Tag', 'noindex, nofollow');
-    res.sendFile(path.join(root, route === '/' ? 'index.html' : `${route}/index.html`));
+    // Keep the trusted build root separate so a parent worktree directory that
+    // starts with a dot is not treated as a requested hidden asset.
+    res.sendFile(route === '/' ? 'index.html' : `${route.slice(1)}/index.html`, { root });
   });
 }
-app.get('/dashboard/:conversationId', (_req, res) => res.set('X-Robots-Tag', 'noindex, nofollow').sendFile(path.join(root, 'private.html')));
+app.get('/dashboard/:conversationId', (_req, res) => res.set('X-Robots-Tag', 'noindex, nofollow').sendFile('private.html', { root }));
 app.use(express.static(root, { index: false, dotfiles: 'deny' }));
-app.use((_req, res) => res.status(404).set('X-Robots-Tag', 'noindex, nofollow').sendFile(path.join(root, '404.html')));
+app.use((_req, res) => res.status(404).set('X-Robots-Tag', 'noindex, nofollow').sendFile('404.html', { root }));
 const server = app.listen(Number(process.env.PORT || 3000), localPreview ? '127.0.0.1' : undefined, () => {
   console.log(`Nuelexity frontend running on port ${server.address().port}${localPreview ? ' (local preview)' : ''}`);
 });
