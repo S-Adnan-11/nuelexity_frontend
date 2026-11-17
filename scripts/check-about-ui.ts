@@ -27,6 +27,7 @@ async function until(fn: () => Promise<unknown>, label: string, tries = 180) {
   throw new Error("Timed out: " + label);
 }
 let socket: WebSocket | undefined, sequence = 0, commits = 0;
+let closing = false;
 const pending = new Map<number, { resolve: (data: any) => void; reject: (error: Error) => void }>();
 function send(method: string, params: any = {}) {
   return new Promise<any>((resolve, reject) => {
@@ -34,6 +35,13 @@ function send(method: string, params: any = {}) {
     const timer = setTimeout(() => { pending.delete(id); reject(new Error("CDP timeout: " + method)); }, 15000);
     pending.set(id, { resolve: data => { clearTimeout(timer); resolve(data); }, reject: error => { clearTimeout(timer); reject(error); } });
     socket!.send(JSON.stringify({ id, method, params }));
+  });
+}
+function respond(method: string, params: object) {
+  void send(method, params).catch(error => {
+    // Navigation can cancel an intercepted request; closing Chrome also drops
+    // replies. Neither should leave an unhandled promise after assertions pass.
+    if (!closing && !/Invalid InterceptionId/.test(String(error))) failures.push("Browser response failed: " + method);
   });
 }
 async function evaluate(expression: string) {
@@ -85,17 +93,18 @@ try {
   const tabs = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json() as any[];
   socket = new WebSocket(tabs.find(tab => tab.type === "page").webSocketDebuggerUrl);
   socket.onmessage = event => {
+    if (closing) return;
     const packet = JSON.parse(String(event.data));
     if (packet.method === "Page.frameNavigated" && !packet.params.frame.parentId) commits++;
     if (packet.method === "Runtime.exceptionThrown") failures.push("Uncaught browser exception");
     if (packet.method === "Fetch.requestPaused") {
       const url = new URL(packet.params.request.url);
-      if (url.origin !== server.url.origin) { external.push(url.origin); void send("Fetch.failRequest", { requestId: packet.params.requestId, errorReason: "BlockedByClient" }); }
-      else if (failWorkspace && /\/assets\/Dashboard-/.test(url.pathname)) void send("Fetch.failRequest", { requestId: packet.params.requestId, errorReason: "ConnectionFailed" });
-      else void send("Fetch.continueRequest", { requestId: packet.params.requestId });
+      if (url.origin !== server.url.origin) { external.push(url.origin); respond("Fetch.failRequest", { requestId: packet.params.requestId, errorReason: "BlockedByClient" }); }
+      else if (failWorkspace && /\/assets\/Dashboard-/.test(url.pathname)) respond("Fetch.failRequest", { requestId: packet.params.requestId, errorReason: "ConnectionFailed" });
+      else respond("Fetch.continueRequest", { requestId: packet.params.requestId });
     }
     if (packet.method === "Page.screencastFrame") {
-      void send("Page.screencastFrameAck", { sessionId: packet.params.sessionId });
+      respond("Page.screencastFrameAck", { sessionId: packet.params.sessionId });
       if (recording) {
         const file = path.join(evidence, "demo-frames", String(frames.length).padStart(5, "0") + ".jpg");
         frames.push({ file, timestamp: packet.params.metadata.timestamp });
@@ -265,6 +274,9 @@ try {
   await writeFile(path.join(evidence,"about-verification.json"),JSON.stringify({layouts,phases:[...phases],cycleSeconds:demoDuration/1000,applicationApiRequests:failures,externalRequests:external,requestedPaths:[...new Set(requests)],closures,offscreenPause:true,actualBackgroundTabPause:true,hoverDoesNotFreeze:true,reducedMotionStatic:true,unmountCleanup:true,stableDocumentAndFocus:true,accessibilityTreeChecked:true,recordedFrames:frames.length,physicalDevices:false,screenReaderManuallyTested:false},null,2));
   console.log("PASS About: exact prompts/models, 64s coordinated loop, camera framing, internal scroll/read holds, centered send icon, repeating short blink, zero API/provider requests, background/offscreen pause, no hover freeze, reduced motion, cleanup, both themes at 320/390/768/1440/1920. Evidence: "+evidence);
 } finally {
+  closing = true;
+  for (const waiter of pending.values()) waiter.reject(new Error("Browser fixture closed"));
+  pending.clear();
   socket?.close();chrome.kill();await chrome.exited;server.stop();
   await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:150});
 }
