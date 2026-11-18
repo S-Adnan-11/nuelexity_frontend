@@ -10,12 +10,29 @@ export const pagesDocuments = {
   "auth/callback/index.html": "auth/callback.html", "dashboard/index.html": "dashboard.html",
   "private.html": "private.html", "404.html": "404.html",
 };
-export function validatePagesConfig(settings) {
+function stagingOrigin(value, suffix) {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.origin !== value || !url.hostname.endsWith(suffix))
+    throw new Error("Staging needs an exact HTTPS origin on " + suffix);
+  return url.origin;
+}
+
+/** @param {Record<string,string | undefined>} settings @param {{ backend: string, frontend: string, supabase: string, productionSupabase: string } | undefined} [preview] */
+export function validatePagesConfig(settings, preview = undefined) {
   const keys = Object.keys(publicEnv({})).sort();
   if (JSON.stringify(Object.keys(settings).sort()) !== JSON.stringify(keys)) throw new Error("Pages config must contain exactly the four public settings.");
   if (Object.values(settings).some(value => typeof value !== "string")) throw new Error("Public settings must be strings.");
   publicEnv(settings); // Reject service-role/secret Supabase keys too.
-  if (settings.BUN_PUBLIC_BACKEND_URL !== productionBackend) throw new Error("Pages requires the approved production backend URL.");
+  if (preview) {
+    stagingOrigin(preview.frontend, ".pages.dev");
+    if (stagingOrigin(preview.backend, ".onrender.com") === productionBackend ||
+        settings.BUN_PUBLIC_BACKEND_URL !== preview.backend)
+      throw new Error("Preview requires its isolated Render backend.");
+    if (stagingOrigin(preview.supabase, ".supabase.co") === preview.productionSupabase ||
+        settings.BUN_PUBLIC_SUPABASE_URL !== preview.supabase)
+      throw new Error("Preview requires its isolated Supabase endpoint.");
+    stagingOrigin(preview.productionSupabase, ".supabase.co");
+  } else if (settings.BUN_PUBLIC_BACKEND_URL !== productionBackend) throw new Error("Pages requires the approved production backend URL.");
   let supabase;
   try { supabase = new URL(settings.BUN_PUBLIC_SUPABASE_URL); } catch { throw new Error("A public Supabase HTTPS URL is required."); }
   if (supabase.protocol !== "https:" || supabase.username || supabase.password || !supabase.hostname.endsWith(".supabase.co") || !["", "/"].includes(supabase.pathname) || supabase.search || supabase.hash) throw new Error("Use the existing Supabase project HTTPS origin.");
@@ -23,17 +40,19 @@ export function validatePagesConfig(settings) {
   let anon = false;
   try { anon = JSON.parse(Buffer.from(key.split(".")[1] || "", "base64url").toString()).role === "anon"; } catch {}
   if (!key.startsWith("sb_publishable_") && !anon) throw new Error("A public Supabase publishable/anon key is required.");
-  if (!/^[A-Za-z0-9_-]{20,100}$/.test(settings.BUN_PUBLIC_TURNSTILE_SITE_KEY) || /^[123]x0{10}/.test(settings.BUN_PUBLIC_TURNSTILE_SITE_KEY)) throw new Error("A non-test production Turnstile site key is required; widget hostname/secret pairing still needs real acceptance.");
+  if (!/^[A-Za-z0-9_-]{20,100}$/.test(settings.BUN_PUBLIC_TURNSTILE_SITE_KEY) || (!preview && /^[123]x0{10}/.test(settings.BUN_PUBLIC_TURNSTILE_SITE_KEY))) throw new Error("A non-test production Turnstile site key is required; widget hostname/secret pairing still needs real acceptance.");
   return supabase.origin;
 }
-export function pagesHeaders(settings, hashes) {
-  const supabase = validatePagesConfig(settings);
+/** @param {Record<string,string | undefined>} settings @param {string[]} hashes @param {Parameters<typeof validatePagesConfig>[1]} [preview] */
+export function pagesHeaders(settings, hashes, preview = undefined) {
+  const supabase = validatePagesConfig(settings, preview);
   if (!Array.isArray(hashes) || !hashes.length || hashes.some(hash => !/^'sha256-[A-Za-z0-9+/]{43}='$/.test(hash))) throw new Error("Invalid structured-data CSP hashes.");
-  const csp = `default-src 'none'; script-src 'self' https://challenges.cloudflare.com ${hashes.join(" ")}; style-src 'self' 'unsafe-inline'; img-src 'self' https:; font-src 'self'; connect-src 'self' ${productionBackend} ${supabase} https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'`;
+  const csp = `default-src 'none'; script-src 'self' https://challenges.cloudflare.com ${hashes.join(" ")}; style-src 'self' 'unsafe-inline'; img-src 'self' https:; font-src 'self'; connect-src 'self' ${settings.BUN_PUBLIC_BACKEND_URL} ${supabase} https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'`;
   const lines = ["/*", "  X-Content-Type-Options: nosniff", "  Referrer-Policy: no-referrer", "  X-Frame-Options: DENY", "  Permissions-Policy: camera=(), microphone=(), geolocation=()", "  Content-Security-Policy: " + csp, "", "/assets/*", "  Cache-Control: public, max-age=31536000, immutable", ""];
   // Both incoming private URLs and the rewrite destination get explicit controls.
   for (const route of ["/account", "/account.html", "/auth", "/auth.html", "/auth/*", "/dashboard", "/dashboard.html", "/dashboard/*", "/private", "/private.html"]) lines.push(route, "  Cache-Control: private, no-store", "  X-Robots-Tag: noindex, nofollow", "");
   lines.push("/config.json", "  Cache-Control: no-store", "  X-Robots-Tag: noindex, nofollow", "", "/404.html", "  X-Robots-Tag: noindex, nofollow", "", "https://:project.pages.dev/*", "  X-Robots-Tag: noindex", "", "https://:version.:project.pages.dev/*", "  X-Robots-Tag: noindex", "");
+  if (preview) lines.splice(1, 0, "  X-Robots-Tag: noindex, nofollow");
   if (lines.some(line => line.length > 2000)) throw new Error("Pages header exceeds the platform line limit.");
   return lines.join("\n");
 }
@@ -58,12 +77,12 @@ export function publicInformationHeaders(hashes) {
     "https://:project.pages.dev/*", "  X-Robots-Tag: noindex", "", "https://:version.:project.pages.dev/*", "  X-Robots-Tag: noindex", ""].join("\n");
 }
 export const publicInformationRedirects = [pagesRedirects.trim(), "/auth/* /private 200", "/account/* /private 200", ""].join("\n");
-export async function preparePages(source, destination, { limited = false } = {}) {
+export async function preparePages(source, destination, { limited = false, preview } = {}) {
   if (!["pages-review", "pages-dist", "pages-public-review", "pages-public-dist"].includes(path.basename(destination))) throw new Error("Unexpected Pages output directory.");
   if (limited && JSON.parse(await readFile(path.join(source, "release-mode.json"), "utf8")).mode !== "public-information") throw new Error("Limited release requires the separate public-information build.");
   const settings = limited ? null : JSON.parse(await readFile(path.join(source, "config.json"), "utf8"));
   const hashes = JSON.parse(await readFile(path.join(source, "csp-hashes.json"), "utf8"));
-  const headers = limited ? publicInformationHeaders(hashes) : pagesHeaders(settings, hashes);
+  const headers = limited ? publicInformationHeaders(hashes) : pagesHeaders(settings, hashes, preview);
   await rejectSymlinks(source);
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
@@ -73,6 +92,7 @@ export async function preparePages(source, destination, { limited = false } = {}
     await cp(path.join(source, from), path.join(destination, to));
   }
   for (const file of [...(limited ? [] : ["config.json"]), "robots.txt", "sitemap.xml", "theme-init.js", "assets", "brand"]) await cp(path.join(source, file), path.join(destination, file), { recursive: true });
+  if (preview) await writeFile(path.join(destination, "robots.txt"), "User-agent: *\nDisallow: /\n");
   await writeFile(path.join(destination, "_headers"), headers);
   await writeFile(path.join(destination, "_redirects"), limited ? publicInformationRedirects : pagesRedirects);
 }

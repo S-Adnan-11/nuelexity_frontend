@@ -111,3 +111,16 @@ test("limited artifact excludes public application configuration and refuses ful
   for(const excluded of ["config.json", "release-mode.json", "csp-hashes.json", "content.sha256"]) await expect(readFile(path.join(dest, excluded))).rejects.toThrow();
   expect(await readFile(path.join(dest,"_headers"),"utf8")).toContain("connect-src 'none'");
 });
+
+test("preview headers restrict connections to the selected staging services", () => {
+  const preview = {backend:"https://fixture-stage.onrender.com", frontend:"https://fixture-stage.pages.dev",
+    supabase:"https://fixture-stage.supabase.co", productionSupabase:settings.BUN_PUBLIC_SUPABASE_URL};
+  const stage = {...settings, BUN_PUBLIC_BACKEND_URL:preview.backend, BUN_PUBLIC_SUPABASE_URL:preview.supabase};
+  const headers = pagesHeaders(stage, ["'sha256-" + Buffer.alloc(32).toString("base64") + "'"], preview);
+  expect(headers).toContain(preview.backend);
+  expect(headers.split("\n\n")[0]).toContain("noindex");
+  expect(headers).not.toContain(settings.BUN_PUBLIC_BACKEND_URL);
+  expect(() => validatePagesConfig(stage)).toThrow();
+  expect(() => validatePagesConfig(stage, {...preview, productionSupabase:preview.supabase})).toThrow();
+  expect(() => validatePagesConfig(settings, preview)).toThrow();
+});
