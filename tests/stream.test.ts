@@ -12,9 +12,9 @@ function stream(text: string, size = 1) {
     },
   });
 }
-async function collect(text: string) {
+async function collect(text: string, chunkSize = 1) {
   const events = [];
-  for await (const event of readSearchEvents(stream(text))) events.push(event);
+  for await (const event of readSearchEvents(stream(text, chunkSize))) events.push(event);
   return events;
 }
 test("handles fragmented UTF-8, CRLF, heartbeats and all answer chunks", async () => {
@@ -43,7 +43,9 @@ test("error events are terminal and do not accept a later done", async () => {
 test("rejects malformed and oversized events", async () => {
   await expect(collect('event: delta\ndata: {"text":123}\n\n')).rejects.toThrow("Invalid answer");
   await expect(collect('event: follow_ups\ndata: {"questions":[1]}\n\n')).rejects.toThrow();
-  await expect(collect(`event: delta\ndata: ${"x".repeat(70000)}`)).rejects.toThrow("oversized");
+  // Keep the overflow boundary split across network-sized chunks. One-byte
+  // UTF-8 fragmentation is covered above without allocating 70,000 queue items.
+  await expect(collect(`event: delta\ndata: ${"x".repeat(70000)}`, 4096)).rejects.toThrow("oversized");
 });
 test("public environment whitelist never includes secret values and supports old local names", () => {
   const settings = publicEnv({

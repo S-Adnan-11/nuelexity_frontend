@@ -142,7 +142,10 @@ try{
       if(['/about','/legal','/auth'].includes(route)){const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(path.join(evidence,`${route.slice(1)}-${width}-${theme}.png`),Buffer.from(shot.data,'base64'));}
     }
   }
-  await send('Page.navigate',{url:base+'/about'});await until(()=>evaluate("!!document.querySelector('.about-hero .primary-link')"),'About');await delay(150);
+  await send('Page.navigate',{url:base+'/about'});await until(()=>evaluate("!!document.querySelector('.about-hero .primary-link')"),'About');
+  // The prerendered link precedes hydration. Wait for React before exercising
+  // client navigation, otherwise a full navigation restores the test's pass.
+  await until(()=>evaluate("Object.keys(document.getElementById('root')).some(k=>k.startsWith('__reactContainer'))"),'About interactive');
   await evaluate("sessionStorage.removeItem('nuelexity:eligibility.v1');document.querySelector('.about-hero .primary-link').click()");
   await until(()=>evaluate("!!document.querySelector('.eligibility-page')&&document.querySelector('meta[name=robots]').content==='noindex,nofollow'"),'workspace eligibility');
   assert.equal(await evaluate("document.querySelectorAll('script[type=\"application/ld+json\"]').length"),0);

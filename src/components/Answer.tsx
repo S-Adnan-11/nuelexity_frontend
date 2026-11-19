@@ -21,9 +21,9 @@ export function Answer({ content, sources }: { content: string; sources: Source[
         if (!node.children || ["link", "linkReference", "code", "inlineCode", "html"].includes(node.type)) return;
         node.children = node.children.flatMap((child): Node[] => {
           if (child.type !== "text") { walk(child); return [child]; }
-          return (child.value || "").split(/(\[\d{1,3}\])/g).filter(Boolean).map((value): Node => {
-            const match = /^\[(\d+)\]$/.exec(value);
-            const source = match && sources.find((source) => source.id === Number(match[1]));
+          return (child.value || "").split(/(\[\d{1,3}\]|【\d{1,3}】)/g).filter(Boolean).map((value): Node => {
+            const match = /^(?:\[(\d+)\]|【(\d+)】)$/.exec(value);
+            const source = match && sources.find((source) => source.id === Number(match[1] || match[2]));
             const url = source && safeSourceUrl(source.url);
             return source && url ? { type: "link", url, children: [{ type: "text", value: String(source.id) }],
               data: { hProperties: { className: "citation", "aria-label": `Source ${source.id}: ${source.title}` } } }

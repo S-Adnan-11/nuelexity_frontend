@@ -124,6 +124,11 @@ a { color: inherit; text-decoration: none; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--nx-link); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
 .copy-answer { margin: 10px 0 0 -8px; }
+.answer-report { color: var(--nx-muted); font-size: 11px; line-height: 1.6; margin-top: 16px; max-width: 65ch; }
+.answer-report summary { cursor: pointer; width: fit-content; }
+.answer-report summary:focus-visible { outline: 2px solid var(--nx-link); outline-offset: 4px; }
+.answer-report p { margin: 8px 0; }
+.answer-report a { color: var(--nx-link); }
 .follow-ups { margin-top: 18px; }
 .follow-ups > p { font-size: 12px; color: var(--nx-muted); margin-bottom: 10px; }
 .follow-ups button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; border: 0; border-top: 1px solid var(--nx-divider); background: none; color: var(--nx-text); font-size: 13px; line-height: 1.6; padding: 13px 0; }
